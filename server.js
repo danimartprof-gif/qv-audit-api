@@ -9,6 +9,7 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const RECIPIENTS = process.env.AUDIT_RECIPIENTS || 'dani.martprof@gmail.com';
 const SENDER = process.env.SENDER_EMAIL || 'dani.martprof@gmail.com';
 const CORS = process.env.CORS_ORIGIN || '*';
+const SHEET_ID = process.env.AUDIT_SHEET_ID || '';
 
 const SYS = `Eres un analista experto de Quantum Ventures (venture builder privado para creadores de élite) especializado en AUDITORÍA DE MARCA PERSONAL y PROYECCIÓN DE MONETIZACIÓN. Dado el formulario de un influencer, evalúa su atractivo como PARTNER de QV y devuelve un rating para el equipo de dirección. ICP de QV: creadores con tráfico orgánico YA consolidado + alto valor percibido que permita desarrollar infoproductos, marcas propias (suplementos/ropa/alimentación), comunidad y patrimonio. NO captan creadores en crecimiento inicial. Evalúa 7 dimensiones (0-100): 1) Calidad y tamaño de audiencia, 2) Engagement/comunidad, 3) Potencial de monetización/escalera de valor, 4) Autoridad y marca personal, 5) Diversificación y disposición a productos propios, 6) Madurez de negocio/estructura, 7) Encaje con el modelo QV. Calcula un quantum_score global 0-100 (media ponderada con más peso a monetización y encaje), tier (A=prioridad alta, B=interesante, C=dudoso, PASS=descartar), señales clave, riesgos y next_step. Sé honesto y crítico, no infles. Responde SOLO JSON.`;
 
@@ -89,6 +90,17 @@ async function getAvatar(form) {
   return null;
 }
 
+async function logSheet(tab, row) {
+  if (!SHEET_ID) return;
+  try {
+    const token = await gmailToken(); // dani's token also carries the spreadsheets scope
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tab)}!A1:append?valueInputOption=RAW`;
+    const r = await fetch(url, { method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({ values:[row] }) });
+    if (!r.ok) console.error('sheet log', tab, r.status, await r.text());
+  } catch (e) { console.error('sheet log error:', e.message); }
+}
+const nowES = () => { try { return new Date().toLocaleString('es-ES',{timeZone:'Europe/Madrid'}); } catch(e){ return new Date().toISOString(); } };
+
 async function sendHtmlMail(token, subject, html, avatar) {
   const head = [`From: Quantum Ventures <${SENDER}>`, `To: ${RECIPIENTS}`, `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`, 'MIME-Version: 1.0'];
   let mime;
@@ -166,6 +178,7 @@ async function handleAudit(form) {
   if(!form || !form.nombre || !form.email) { const e=new Error('missing fields'); e.code=400; throw e; }
   const rating = await score(form);
   await sendEmail(form, rating);
+  await logSheet('Interes', [nowES(), form.nombre, form.email, form.nicho||'', form.handle_principal||'', form.instagram||'', form.youtube||'', form.tiktok||'', form.engagement_pct||'', form.monetizacion_actual||'', form.ingresos_aprox||'', form.equipo||'', form.objetivo||'', rating.tier, rating.quantum_score, rating.resumen||'']);
   return { ok:true, tier:rating.tier, score:rating.quantum_score };
 }
 
@@ -209,7 +222,42 @@ async function handleProduct(form) {
   if(!form || !form.nombre || !form.email) { const e=new Error('missing fields'); e.code=400; throw e; }
   const rating = await scoreProduct(form);
   await sendProductEmail(form, rating);
+  await logSheet('Producto', [nowES(), form.nombre, form.email, form.nicho_label||form.nicho||'', form.producto||'', form.precio||'', form.margen||'', form.ingresos_mes||'', form.recurrencia||'', rating.veredicto, rating.scalability_score, rating.resumen||'', rating.recomendacion_consejo||'']);
   return { ok:true, veredicto:rating.veredicto, score:rating.scalability_score };
+}
+
+// ===== Fiscal / estructura =====
+const FISCAL_SYS = `Eres asesor de ESTRUCTURA para Quantum Ventures. Dada la situación fiscal/legal actual de un creador (persona física o empresa, país, residencia fiscal, régimen, IVA, facturación, estructura existente), redacta una NOTA ORIENTATIVA breve para el equipo: estructura recomendada para la colaboración (p. ej. autónomo vs SL; posible holding + SPV por marca según el modelo QV), puntos a validar y banderas/riesgos. IMPORTANTE: NO es asesoramiento fiscal/legal vinculante; indica SIEMPRE que debe validarlo un asesor fiscal/abogado. Responde SOLO JSON.`;
+const FISCAL_SCHEMA = { type:'object', properties:{ estructura_recomendada:{type:'string'}, puntos_validar:{type:'array',items:{type:'string'}}, notas:{type:'string'} }, required:['estructura_recomendada','puntos_validar','notas'] };
+
+async function genJSON(sys, schema, prefix, form) {
+  const token = await vertexToken();
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`;
+  const body = { systemInstruction:{parts:[{text:sys}]}, contents:[{role:'user',parts:[{text:prefix+JSON.stringify(form)}]}], generationConfig:{temperature:0.4,responseMimeType:'application/json',responseSchema:schema} };
+  const r = await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error('vertex '+r.status+' '+await r.text());
+  const j = await r.json(); return JSON.parse(j.candidates[0].content.parts[0].text);
+}
+
+function fiscalEmailHtml(form, r) {
+  const li=(arr)=>`<ul style="margin:0 0 24px;padding-left:20px">`+(arr||[]).map(x=>`<li style="margin:0 0 9px;color:#cbd5e1;font-size:14px;line-height:1.7">${x}</li>`).join('')+`</ul>`;
+  return `<div style="${EM.wrap}">
+    ${emHeader('Quantum Ventures · Información fiscal · para el equipo', form.nombre||'—', form.tipo||'', false)}
+    <p style="${EM.para}">Tipo: <b style="color:#fff">${form.tipo||'—'}</b> · País: ${form.pais||'—'} · Residencia fiscal: ${form.residencia_fiscal||'—'} · Régimen: ${form.regimen||'—'} · IVA: ${form.iva||'—'} · Facturación/año: ${form.facturacion_anual||'—'}</p>
+    <div style="${EM.card}">${emLabel('Estructura recomendada (orientativa)','#22d3ee')}<div style="font-size:15px;color:#e7ecf3;line-height:1.75">${r.estructura_recomendada||''}</div></div>
+    ${emLabel('Puntos a validar','#f59e0b')}${li(r.puntos_validar)}
+    <p style="${EM.para}">${r.notas||''}</p>
+    <div style="${EM.footer}">⚠️ Nota orientativa generada por IA. NO es asesoramiento fiscal/legal vinculante — validar con asesor fiscal/abogado.<br><br><b style="color:#aab4c4">Datos</b><br>Identificador: ${form.identificador||'—'} · Estructura actual: ${form.estructura_actual||'—'} · Email: ${form.email||'—'}</div>
+  </div>`;
+}
+
+async function handleFiscal(form) {
+  if(!form || !form.nombre || !form.email) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const r = await genJSON(FISCAL_SYS, FISCAL_SCHEMA, 'Situación fiscal/legal del creador:\n', form);
+  const token = await gmailToken();
+  await sendHtmlMail(token, `Info fiscal · ${form.nombre||''} (${form.tipo||''})`, fiscalEmailHtml(form, r), null);
+  await logSheet('Fiscal', [nowES(), form.nombre, form.email, form.tipo||'', form.pais||'', form.residencia_fiscal||'', form.identificador||'', form.regimen||'', form.iva||'', form.facturacion_anual||'', form.estructura_actual||'', r.estructura_recomendada||'']);
+  return { ok:true };
 }
 
 if (require.main === module) {
@@ -219,8 +267,8 @@ if (require.main === module) {
     res.setHeader('Access-Control-Allow-Headers','Content-Type');
     if(req.method==='OPTIONS'){ res.writeHead(204); return res.end(); }
     if(req.method==='GET' && req.url==='/health'){ res.writeHead(200,{'Content-Type':'application/json'}); return res.end('{"ok":true}'); }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : handleAudit;
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }
@@ -233,4 +281,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet };

@@ -10,6 +10,7 @@ const RECIPIENTS = process.env.AUDIT_RECIPIENTS || 'dani.martprof@gmail.com';
 const SENDER = process.env.SENDER_EMAIL || 'dani.martprof@gmail.com';
 const CORS = process.env.CORS_ORIGIN || '*';
 const SHEET_ID = process.env.AUDIT_SHEET_ID || '';
+const CLIENTS_FOLDER = process.env.QV_CLIENTS_FOLDER || '';
 
 const SYS = `Eres un analista experto de Quantum Ventures (venture builder privado para creadores de élite) especializado en AUDITORÍA DE MARCA PERSONAL y PROYECCIÓN DE MONETIZACIÓN. Dado el formulario de un influencer, evalúa su atractivo como PARTNER de QV y devuelve un rating para el equipo de dirección. ICP de QV: creadores con tráfico orgánico YA consolidado + alto valor percibido que permita desarrollar infoproductos, marcas propias (suplementos/ropa/alimentación), comunidad y patrimonio. NO captan creadores en crecimiento inicial. Evalúa 7 dimensiones (0-100): 1) Calidad y tamaño de audiencia, 2) Engagement/comunidad, 3) Potencial de monetización/escalera de valor, 4) Autoridad y marca personal, 5) Diversificación y disposición a productos propios, 6) Madurez de negocio/estructura, 7) Encaje con el modelo QV. Calcula un quantum_score global 0-100 (media ponderada con más peso a monetización y encaje), tier (A=prioridad alta, B=interesante, C=dudoso, PASS=descartar), señales clave, riesgos y next_step. Sé honesto y crítico, no infles. Responde SOLO JSON.`;
 
@@ -299,6 +300,37 @@ Devuelve en español, estructurado y conciso: 1) QUIÉN ES (2-3 líneas); 2) LIN
   return { ok:true, enriched: !!enrich };
 }
 
+// ===== Cliente: crea estructura de carpetas en Drive + comparte =====
+const CLIENT_SUBFOLDERS = ['00 · Marca (branding previo)','01 · Negocio','02 · Contenido (emails y landings)','03 · Fotos y vídeo','04 · Legal y fiscal','05 · Entregables QV'];
+
+async function driveCreateFolder(token, name, parent) {
+  const body = { name, mimeType:'application/vnd.google-apps.folder' };
+  if (parent) body.parents = [parent];
+  const r = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', {method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (!r.ok) throw new Error('drive folder '+r.status+' '+await r.text());
+  return r.json();
+}
+async function driveShare(token, fileId, email) {
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions?sendNotificationEmail=true`, {method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({ role:'writer', type:'user', emailAddress:email })});
+  if (!r.ok) throw new Error('drive share '+r.status+' '+await r.text());
+  return r.json();
+}
+
+async function handleCliente(form) {
+  if(!form || !form.nombre) { const e=new Error('missing fields'); e.code=400; throw e; }
+  if(!CLIENTS_FOLDER) { const e=new Error('clients folder not configured'); e.code=500; throw e; }
+  const token = await gmailToken();
+  const root = await driveCreateFolder(token, form.nombre.trim(), CLIENTS_FOLDER);
+  for (const sub of CLIENT_SUBFOLDERS) { try { await driveCreateFolder(token, sub, root.id); } catch(e){ console.error('subfolder', sub, e.message); } }
+  if (form.email) { try { await driveShare(token, root.id, form.email.trim()); } catch(e){ console.error('share', e.message); } }
+  await logSheet('Clientes', [nowES(), form.nombre, form.email||'', root.webViewLink||'']);
+  try {
+    const html = `<div style="${EM.wrap}">${emHeader('Quantum Ventures · Carpeta de cliente creada', form.nombre, form.email||'', false)}<p style="${EM.para}">Carpeta compartida creada con estructura (Marca · Negocio · Contenido · Fotos/vídeo · Legal/fiscal · Entregables).</p><div style="${EM.card}">${emLabel('Carpeta Drive','#22d3ee')}<div style="font-size:14px"><a href="${root.webViewLink}" style="color:#22d3ee">${root.webViewLink}</a></div></div><div style="${EM.footer}">Compartida con ${form.email||'(sin email)'} · guía de carga: quantumventures.io/onboarding</div></div>`;
+    await sendHtmlMail(token, `Cliente creado · ${form.nombre}`, html, null);
+  } catch(e){ console.error('cliente email', e.message); }
+  return { ok:true, url: root.webViewLink };
+}
+
 if (require.main === module) {
   const server = http.createServer((req,res)=>{
     res.setHeader('Access-Control-Allow-Origin', CORS);
@@ -306,8 +338,8 @@ if (require.main === module) {
     res.setHeader('Access-Control-Allow-Headers','Content-Type');
     if(req.method==='OPTIONS'){ res.writeHead(204); return res.end(); }
     if(req.method==='GET' && req.url==='/health'){ res.writeHead(200,{'Content-Type':'application/json'}); return res.end('{"ok":true}'); }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : handleAudit;
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }
@@ -320,4 +352,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente };

@@ -274,9 +274,9 @@ function contactoEmailHtml(form, enrich) {
   return `<div style="${EM.wrap}">
     ${emHeader('Quantum Ventures · Nuevo contacto', form.nombre||'—', form.tipo_vinculo||'', false)}
     <table style="border-collapse:collapse;margin:0 0 16px">
-      ${row('A qué se dedica', form.actividad)}${row('Cómo lo conocí', form.como_conoci)}${row('Por qué es interesante', form.por_que)}${row('Tipo de vínculo', form.tipo_vinculo)}${row('Links / Redes', form.links)}
+      ${row('Teléfono', form.telefono)}${row('A qué se dedica', form.actividad)}${row('Cómo lo conocí', form.como_conoci)}${row('Por qué es interesante', form.por_que)}${row('Tipo de vínculo', form.tipo_vinculo)}${row('Links / Redes', form.links)}${row('Contexto', form.contexto)}
     </table>
-    ${enrich ? `<div style="${EM.card}">${emLabel('Enriquecimiento (búsqueda en internet)','#22d3ee')}<div style="font-size:14px;color:#e7ecf3;line-height:1.7;white-space:pre-wrap">${enrich.replace(/</g,'&lt;')}</div></div>` : ''}
+    ${enrich ? `<div style="${EM.card}">${emLabel('Perfil enriquecido · LinkedIn, webs y proyectos','#22d3ee')}<div style="font-size:14px;color:#e7ecf3;line-height:1.7;white-space:pre-wrap">${enrich.replace(/</g,'&lt;')}</div></div>` : ''}
     <div style="${EM.footer}">Guardado en tu hoja de contactos.</div>
   </div>`;
 }
@@ -287,13 +287,15 @@ async function handleContacto(form) {
   const wants = (''+(form.buscar||'')).toLowerCase();
   if (wants==='si' || wants==='sí' || wants==='true' || wants==='1' || wants==='on') {
     try {
-      const q = `Eres analista de Quantum Ventures. Investiga en internet quién es esta persona/marca y su potencial para alianzas comerciales (rev share, servicios, ampliar red). Nombre: ${form.nombre}. Actividad: ${form.actividad||''}. Links/redes: ${form.links||''}. Devuelve en español: (1) Quién es, 2-3 líneas; (2) Relevancia/tamaño si aplica (audiencia, empresa...); (3) Potencial comercial concreto para QV en 3-4 puntos. Si no encuentras información fiable, indícalo claramente.`;
+      const q = `Eres analista de RED DE CONTACTOS DE ALTO VALOR de Quantum Ventures. Investiga en internet (LinkedIn si está disponible, webs relacionadas, empresas y proyectos en los que participa) para COMPLETAR el perfil de este contacto. Objetivo: evaluar su valor para (a) colaboraciones estratégicas — financiación, abrir mercados, partnership, rev share — y (b) posibles CONTRATACIONES / incorporación al equipo.
+DATOS BASE: Nombre: ${form.nombre}. Teléfono: ${form.telefono||'(no aportado)'} (solo dato, no buscable). Actividad: ${form.actividad||'(desconocida)'}. Links/redes: ${form.links||'(ninguno)'}. Contexto aportado: ${form.contexto||form.por_que||'(ninguno)'}.
+Devuelve en español, estructurado y conciso: 1) QUIÉN ES (2-3 líneas); 2) LINKEDIN / rol actual / trayectoria; 3) EMPRESAS Y PROYECTOS actuales; 4) WEBS Y PRESENCIA online; 5) POTENCIAL DE COLABORACIÓN ESTRATÉGICA para QV (financiación / abrir mercados / partnership / rev share), concreto; 6) POTENCIAL DE CONTRATACIÓN (qué rol o aporte podría encajar); 7) PRÓXIMO PASO sugerido; 8) FIABILIDAD: qué has verificado y qué no. Si no encuentras info fiable de un punto, dilo en lugar de inventar.`;
       enrich = await geminiSearch(q);
     } catch(e) { enrich = '(No se pudo enriquecer automáticamente: ' + e.message + ')'; }
   }
   const token = await gmailToken();
   await sendHtmlMail(token, `Nuevo contacto · ${form.nombre}`, contactoEmailHtml(form, enrich), null);
-  await logSheet('Contactos', [nowES(), form.nombre, form.actividad||'', form.como_conoci||'', form.por_que||'', form.tipo_vinculo||'', form.links||'', enrich]);
+  await logSheet('Contactos', [nowES(), form.nombre, form.telefono||'', form.actividad||'', form.como_conoci||'', form.por_que||'', form.tipo_vinculo||'', form.links||'', form.contexto||'', enrich]);
   return { ok:true, enriched: !!enrich };
 }
 

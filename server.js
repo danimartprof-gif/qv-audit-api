@@ -239,25 +239,62 @@ async function genJSON(sys, schema, prefix, form) {
   const j = await r.json(); return JSON.parse(j.candidates[0].content.parts[0].text);
 }
 
-function fiscalEmailHtml(form, r) {
-  const li=(arr)=>`<ul style="margin:0 0 24px;padding-left:20px">`+(arr||[]).map(x=>`<li style="margin:0 0 9px;color:#cbd5e1;font-size:14px;line-height:1.7">${x}</li>`).join('')+`</ul>`;
+function fiscalEmailHtml(form) {
+  const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
   return `<div style="${EM.wrap}">
-    ${emHeader('Quantum Ventures · Información fiscal · para el equipo', form.nombre||'—', form.tipo||'', false)}
-    <p style="${EM.para}">Tipo: <b style="color:#fff">${form.tipo||'—'}</b> · País: ${form.pais||'—'} · Residencia fiscal: ${form.residencia_fiscal||'—'} · Régimen: ${form.regimen||'—'} · IVA: ${form.iva||'—'} · Facturación/año: ${form.facturacion_anual||'—'}</p>
-    <div style="${EM.card}">${emLabel('Estructura recomendada (orientativa)','#22d3ee')}<div style="font-size:15px;color:#e7ecf3;line-height:1.75">${r.estructura_recomendada||''}</div></div>
-    ${emLabel('Puntos a validar','#f59e0b')}${li(r.puntos_validar)}
-    <p style="${EM.para}">${r.notas||''}</p>
-    <div style="${EM.footer}">⚠️ Nota orientativa generada por IA. NO es asesoramiento fiscal/legal vinculante — validar con asesor fiscal/abogado.<br><br><b style="color:#aab4c4">Datos</b><br>Identificador: ${form.identificador||'—'} · Estructura actual: ${form.estructura_actual||'—'} · Email: ${form.email||'—'}</div>
+    ${emHeader('Quantum Ventures · Datos fiscales para contrato', form.nombre||'—', form.tipo||'', false)}
+    <table style="border-collapse:collapse;margin:0 0 18px">
+      ${row('Tipo', form.tipo)}${row('Nombre / Razón social', form.nombre)}${row('NIF / CIF', form.nif_cif)}${row('Domicilio fiscal', form.domicilio)}${row('Ciudad', form.ciudad)}${row('CP', form.cp)}${row('País', form.pais)}${row('Representante legal', form.representante)}${row('NIF representante', form.nif_representante)}${row('Email', form.email)}${row('Teléfono', form.telefono)}
+    </table>
+    <div style="${EM.footer}">Datos recogidos para la redacción del contrato comercial. Guardados en la hoja de registro (pestaña Fiscal).</div>
   </div>`;
 }
 
 async function handleFiscal(form) {
   if(!form || !form.nombre || !form.email) { const e=new Error('missing fields'); e.code=400; throw e; }
-  const r = await genJSON(FISCAL_SYS, FISCAL_SCHEMA, 'Situación fiscal/legal del creador:\n', form);
   const token = await gmailToken();
-  await sendHtmlMail(token, `Info fiscal · ${form.nombre||''} (${form.tipo||''})`, fiscalEmailHtml(form, r), null);
-  await logSheet('Fiscal', [nowES(), form.nombre, form.email, form.tipo||'', form.pais||'', form.residencia_fiscal||'', form.identificador||'', form.regimen||'', form.iva||'', form.facturacion_anual||'', form.estructura_actual||'', r.estructura_recomendada||'']);
+  await sendHtmlMail(token, `Datos fiscales · ${form.nombre||''} (${form.tipo||''})`, fiscalEmailHtml(form), null);
+  await logSheet('Fiscal', [nowES(), form.tipo||'', form.nombre||'', form.nif_cif||'', form.domicilio||'', form.ciudad||'', form.cp||'', form.pais||'', form.representante||'', form.nif_representante||'', form.email||'', form.telefono||'']);
   return { ok:true };
+}
+
+// ===== Contactos (CRM personal) con enriquecimiento por búsqueda web (Gemini grounding) =====
+async function geminiSearch(prompt) {
+  const token = await vertexToken();
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent`;
+  const body = { contents:[{role:'user',parts:[{text:prompt}]}], tools:[{googleSearch:{}}], generationConfig:{temperature:0.3} };
+  const r = await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error('vertex '+r.status+' '+await r.text());
+  const j = await r.json(); const c = j.candidates && j.candidates[0];
+  return ((c && c.content && c.content.parts) || []).map(p=>p.text||'').join('').trim();
+}
+
+function contactoEmailHtml(form, enrich) {
+  const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
+  return `<div style="${EM.wrap}">
+    ${emHeader('Quantum Ventures · Nuevo contacto', form.nombre||'—', form.tipo_vinculo||'', false)}
+    <table style="border-collapse:collapse;margin:0 0 16px">
+      ${row('A qué se dedica', form.actividad)}${row('Cómo lo conocí', form.como_conoci)}${row('Por qué es interesante', form.por_que)}${row('Tipo de vínculo', form.tipo_vinculo)}${row('Links / Redes', form.links)}
+    </table>
+    ${enrich ? `<div style="${EM.card}">${emLabel('Enriquecimiento (búsqueda en internet)','#22d3ee')}<div style="font-size:14px;color:#e7ecf3;line-height:1.7;white-space:pre-wrap">${enrich.replace(/</g,'&lt;')}</div></div>` : ''}
+    <div style="${EM.footer}">Guardado en tu hoja de contactos.</div>
+  </div>`;
+}
+
+async function handleContacto(form) {
+  if(!form || !form.nombre) { const e=new Error('missing fields'); e.code=400; throw e; }
+  let enrich = '';
+  const wants = (''+(form.buscar||'')).toLowerCase();
+  if (wants==='si' || wants==='sí' || wants==='true' || wants==='1' || wants==='on') {
+    try {
+      const q = `Eres analista de Quantum Ventures. Investiga en internet quién es esta persona/marca y su potencial para alianzas comerciales (rev share, servicios, ampliar red). Nombre: ${form.nombre}. Actividad: ${form.actividad||''}. Links/redes: ${form.links||''}. Devuelve en español: (1) Quién es, 2-3 líneas; (2) Relevancia/tamaño si aplica (audiencia, empresa...); (3) Potencial comercial concreto para QV en 3-4 puntos. Si no encuentras información fiable, indícalo claramente.`;
+      enrich = await geminiSearch(q);
+    } catch(e) { enrich = '(No se pudo enriquecer automáticamente: ' + e.message + ')'; }
+  }
+  const token = await gmailToken();
+  await sendHtmlMail(token, `Nuevo contacto · ${form.nombre}`, contactoEmailHtml(form, enrich), null);
+  await logSheet('Contactos', [nowES(), form.nombre, form.actividad||'', form.como_conoci||'', form.por_que||'', form.tipo_vinculo||'', form.links||'', enrich]);
+  return { ok:true, enriched: !!enrich };
 }
 
 if (require.main === module) {
@@ -267,8 +304,8 @@ if (require.main === module) {
     res.setHeader('Access-Control-Allow-Headers','Content-Type');
     if(req.method==='OPTIONS'){ res.writeHead(204); return res.end(); }
     if(req.method==='GET' && req.url==='/health'){ res.writeHead(200,{'Content-Type':'application/json'}); return res.end('{"ok":true}'); }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : handleAudit;
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }
@@ -281,4 +318,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch };

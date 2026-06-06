@@ -21,7 +21,7 @@ const SCHEMA = { type:'object', properties:{
 const b64url = (b) => Buffer.from(b).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 
 async function vertexToken() {
-  const sa = JSON.parse(process.env.SA_JSON);
+  const sa = JSON.parse(process.env.SA_JSON || Buffer.from(process.env.SA_JSON_B64 || '', 'base64').toString('utf8'));
   const now = Math.floor(Date.now()/1000);
   const head = b64url(JSON.stringify({alg:'RS256',typ:'JWT'}));
   const claim = b64url(JSON.stringify({iss:sa.client_email, scope:'https://www.googleapis.com/auth/cloud-platform', aud:'https://oauth2.googleapis.com/token', iat:now, exp:now+3600}));

@@ -55,6 +55,56 @@ async function gmailToken() {
   const j = await r.json(); if(!j.access_token) throw new Error('gmail token: '+JSON.stringify(j)); return j.access_token;
 }
 
+function primaryProfile(form) {
+  const handle = (form.handle_principal||'').replace(/^@/,'').trim();
+  const links = (form.enlaces||'') + ' ' + (form.handle_principal||'');
+  const m = links.match(/(instagram|youtube|tiktok|twitter|x)\.com\/(@?[A-Za-z0-9_.\-]+)/i);
+  if (m) { let p=m[1].toLowerCase(); if(p==='x') p='twitter'; return { platform:p, handle:m[2].replace(/^@/,'') }; }
+  if (form.instagram && handle) return { platform:'instagram', handle };
+  if (form.youtube && handle) return { platform:'youtube', handle };
+  if (form.tiktok && handle) return { platform:'tiktok', handle };
+  if (handle) return { platform:'instagram', handle };
+  return null;
+}
+
+async function getAvatar(form) {
+  const p = primaryProfile(form);
+  if (!p) return null;
+  const urls = [
+    `https://unavatar.io/${p.platform}/${encodeURIComponent(p.handle)}?fallback=false`,
+    `https://unavatar.io/${encodeURIComponent(p.handle)}?fallback=false`
+  ];
+  for (const u of urls) {
+    try {
+      const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), 8000);
+      const r = await fetch(u, { redirect:'follow', signal:ctrl.signal }); clearTimeout(t);
+      if (!r.ok) continue;
+      const ct = r.headers.get('content-type')||'';
+      if (!ct.startsWith('image/')) continue;
+      const ab = await r.arrayBuffer();
+      if (ab.byteLength < 500) continue;
+      return { buf: Buffer.from(ab), ct };
+    } catch(e) {}
+  }
+  return null;
+}
+
+async function sendHtmlMail(token, subject, html, avatar) {
+  const head = [`From: Quantum Ventures <${SENDER}>`, `To: ${RECIPIENTS}`, `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`, 'MIME-Version: 1.0'];
+  let mime;
+  if (avatar) {
+    const bnd = 'qvrel'+Date.now();
+    mime = [...head, `Content-Type: multipart/related; boundary="${bnd}"`, '',
+      `--${bnd}`, 'Content-Type: text/html; charset=UTF-8', '', html, '',
+      `--${bnd}`, `Content-Type: ${avatar.ct}`, 'Content-Transfer-Encoding: base64', 'Content-ID: <avatar>', 'Content-Disposition: inline', '', avatar.buf.toString('base64'),
+      `--${bnd}--`, ''].join('\r\n');
+  } else {
+    mime = [...head, 'Content-Type: text/html; charset=UTF-8', '', html].join('\r\n');
+  }
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({raw:b64url(mime)})});
+  if (!r.ok) throw new Error('gmail send '+r.status+' '+await r.text());
+}
+
 // shared email styling helpers (consistent sizes + spacing, dark bg / light text)
 const EM = {
   wrap: 'font-family:Inter,Arial,sans-serif;background:#06070d;color:#e7ecf3;padding:32px;border-radius:14px;max-width:640px',
@@ -73,13 +123,19 @@ const emScore = (n,badgeText,badgeColor,caption)=>`<table style="border-collapse
       <td style="vertical-align:middle;padding-right:14px"><span style="background:${badgeColor};color:#06070d;font-weight:700;font-size:13px;border-radius:999px;padding:7px 16px">${badgeText}</span></td>
       ${caption?`<td style="vertical-align:middle;color:#8b97a8;font-size:13px">${caption}</td>`:''}
     </tr></table>`;
+const emHeader = (eyebrow,name,sub,hasAvatar)=>`<table style="border-collapse:collapse;margin:0 0 22px"><tr>
+      ${hasAvatar?`<td style="vertical-align:middle;padding-right:14px"><img src="cid:avatar" width="50" height="50" alt="" style="border-radius:50%;display:block;border:1px solid rgba(255,255,255,.18)"></td>`:''}
+      <td style="vertical-align:middle">
+        <div style="${EM.eyebrow}">${eyebrow}</div>
+        <div style="font-size:20px;font-weight:700;color:#ffffff;line-height:1.35;margin-top:7px">${name} <span style="color:#8b97a8;font-weight:400">· ${sub}</span></div>
+      </td>
+    </tr></table>`;
 
-function emailHtml(form, r) {
+function emailHtml(form, r, hasAvatar) {
   const dim = r.dimensiones||{};
   const tierColor = {A:'#22d3ee',B:'#6366f1',C:'#f59e0b',PASS:'#f87171'}[r.tier]||'#8b97a8';
   return `<div style="${EM.wrap}">
-    <div style="${EM.eyebrow}">Quantum Ventures · Nuevo lead auditado</div>
-    <h2 style="${EM.name}">${form.nombre||'—'} <span style="color:#8b97a8;font-weight:400">· ${form.nicho||''}</span></h2>
+    ${emHeader('Quantum Ventures · Nuevo lead auditado', form.nombre||'—', form.nicho||'', hasAvatar)}
     ${emScore(r.quantum_score, 'TIER '+r.tier, tierColor, 'Interés / encaje')}
     <p style="${EM.para}">${r.resumen||''}</p>
     ${emLabel('Dimensiones','#22d3ee')}
@@ -100,19 +156,10 @@ function emailHtml(form, r) {
 
 async function sendEmail(form, rating) {
   const token = await gmailToken();
+  const avatar = await getAvatar(form).catch(()=>null);
   const subject = `Lead [Tier ${rating.tier} · ${rating.quantum_score}] ${form.nombre||''} — ${form.nicho||''}`;
-  const html = emailHtml(form, rating);
-  const mime = [
-    `From: Quantum Ventures <${SENDER}>`,
-    `To: ${RECIPIENTS}`,
-    `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/html; charset=UTF-8',
-    '', html
-  ].join('\r\n');
-  const raw = b64url(mime);
-  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({raw})});
-  if(!r.ok) throw new Error('gmail send '+r.status+' '+await r.text());
+  const html = emailHtml(form, rating, !!avatar);
+  await sendHtmlMail(token, subject, html, avatar);
 }
 
 async function handleAudit(form) {
@@ -132,12 +179,11 @@ async function scoreProduct(form) {
   return JSON.parse(j.candidates[0].content.parts[0].text);
 }
 
-function productEmailHtml(form, r) {
+function productEmailHtml(form, r, hasAvatar) {
   const o=r.objetivo||{}, s=r.subjetivo||{};
   const vc={GO:'#22d3ee',EXPLORE:'#f59e0b',NO_GO:'#f87171'}[r.veredicto]||'#8b97a8';
   return `<div style="${EM.wrap}">
-    <div style="${EM.eyebrow}">Quantum Ventures · Auditoría de producto/servicio · para el Consejo</div>
-    <h2 style="${EM.name}">${form.nombre||'—'} <span style="color:#8b97a8;font-weight:400">· ${form.producto||form.nicho||''}</span></h2>
+    ${emHeader('Quantum Ventures · Auditoría de producto/servicio · para el Consejo', form.nombre||'—', form.producto||form.nicho||'', hasAvatar)}
     ${emScore(r.scalability_score, r.veredicto, vc, 'Potencial de escalabilidad')}
     <p style="${EM.para}">${r.resumen||''}</p>
     ${emLabel('Criterios objetivos','#22d3ee')}
@@ -153,11 +199,10 @@ function productEmailHtml(form, r) {
 
 async function sendProductEmail(form, rating) {
   const token = await gmailToken();
+  const avatar = await getAvatar(form).catch(()=>null);
   const subject = `Auditoría producto [${rating.veredicto} · ${rating.scalability_score}] ${form.nombre||''}`;
-  const html = productEmailHtml(form, rating);
-  const mime = [`From: Quantum Ventures <${SENDER}>`,`To: ${RECIPIENTS}`,`Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,'MIME-Version: 1.0','Content-Type: text/html; charset=UTF-8','',html].join('\r\n');
-  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({raw:b64url(mime)})});
-  if(!r.ok) throw new Error('gmail send '+r.status+' '+await r.text());
+  const html = productEmailHtml(form, rating, !!avatar);
+  await sendHtmlMail(token, subject, html, avatar);
 }
 
 async function handleProduct(form) {
@@ -188,4 +233,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile };

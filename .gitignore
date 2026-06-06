@@ -1,0 +1,4 @@
+node_modules
+*.json.key
+qv-audit-sa.json
+.env

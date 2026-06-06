@@ -1,0 +1,1 @@
+{ "name":"qv-audit-api","version":"1.0.0","private":true,"description":"Quantum Ventures audit scoring API","main":"server.js","engines":{"node":">=22"} }

@@ -55,34 +55,44 @@ async function gmailToken() {
   const j = await r.json(); if(!j.access_token) throw new Error('gmail token: '+JSON.stringify(j)); return j.access_token;
 }
 
+// shared email styling helpers (consistent sizes + spacing, dark bg / light text)
+const EM = {
+  wrap: 'font-family:Inter,Arial,sans-serif;background:#06070d;color:#e7ecf3;padding:32px;border-radius:14px;max-width:640px',
+  eyebrow: 'font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:#22d3ee;font-weight:600',
+  name: 'margin:14px 0 22px;font-size:20px;font-weight:700;color:#ffffff;line-height:1.35',
+  para: 'color:#aab4c4;font-size:15px;line-height:1.75;margin:0 0 24px',
+  card: 'background:#0c0e17;border:1px solid rgba(255,255,255,.10);border-radius:10px;padding:18px;margin:0 0 24px',
+  footer: 'border-top:1px solid rgba(255,255,255,.10);padding-top:18px;font-size:13px;color:#8b97a8;line-height:1.9'
+};
+const emLabel = (t,c)=>`<div style="color:${c};font-size:12px;text-transform:uppercase;letter-spacing:.12em;font-weight:600;margin:0 0 12px">${t}</div>`;
+const emBar = (v)=>`<span style="display:inline-block;width:150px;height:8px;border-radius:6px;background:#1b2233;vertical-align:middle"><span style="display:inline-block;height:8px;border-radius:6px;background:linear-gradient(90deg,#22d3ee,#6366f1);width:${Math.max(0,Math.min(100,v||0))}%"></span></span>`;
+const emRow = (k,v)=>`<tr><td style="padding:7px 16px 7px 0;color:#9aa6b8;font-size:14px;white-space:nowrap">${k}</td><td style="padding:7px 0">${emBar(v)} <b style="color:#e7ecf3;font-size:14px;padding-left:8px">${v??'—'}</b></td></tr>`;
+const emList = (arr)=>`<ul style="margin:0 0 24px;padding-left:20px">`+(arr||[]).map(x=>`<li style="margin:0 0 9px;color:#cbd5e1;font-size:14px;line-height:1.7">${x}</li>`).join('')+`</ul>`;
+const emScore = (n,badgeText,badgeColor,caption)=>`<table style="border-collapse:collapse;margin:0 0 22px"><tr>
+      <td style="vertical-align:middle;padding-right:16px"><span style="font-size:38px;font-weight:800;color:#ffffff">${n}</span><span style="font-size:16px;color:#8b97a8">/100</span></td>
+      <td style="vertical-align:middle;padding-right:14px"><span style="background:${badgeColor};color:#06070d;font-weight:700;font-size:13px;border-radius:999px;padding:7px 16px">${badgeText}</span></td>
+      ${caption?`<td style="vertical-align:middle;color:#8b97a8;font-size:13px">${caption}</td>`:''}
+    </tr></table>`;
+
 function emailHtml(form, r) {
   const dim = r.dimensiones||{};
-  const bar = (v)=>`<div style="background:#1b2233;border-radius:6px;height:8px;width:160px;display:inline-block;vertical-align:middle"><div style="background:linear-gradient(90deg,#22d3ee,#6366f1);height:8px;border-radius:6px;width:${Math.max(0,Math.min(100,v))}%"></div></div>`;
-  const row = (k,v)=>`<tr><td style="padding:4px 12px 4px 0;color:#8b97a8;font-size:13px">${k}</td><td style="padding:4px 0">${bar(v)} <b style="color:#e7ecf3;font-size:13px">${v}</b></td></tr>`;
-  const li = (arr,c)=>(arr||[]).map(x=>`<li style="margin:4px 0;color:${c}">${x}</li>`).join('');
   const tierColor = {A:'#22d3ee',B:'#6366f1',C:'#f59e0b',PASS:'#f87171'}[r.tier]||'#8b97a8';
-  return `<div style="font-family:Inter,Arial,sans-serif;background:#06070d;color:#e7ecf3;padding:24px;border-radius:14px;max-width:640px">
-    <div style="font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#22d3ee">Quantum Ventures · Nuevo lead auditado</div>
-    <h2 style="margin:8px 0 2px;font-size:22px">${form.nombre||'—'} <span style="color:#8b97a8;font-weight:400">· ${form.nicho||''}</span></h2>
-    <div style="margin:14px 0;display:flex;gap:14px;align-items:center">
-      <div style="font-size:40px;font-weight:800;color:#fff">${r.quantum_score}<span style="font-size:18px;color:#8b97a8">/100</span></div>
-      <div style="background:${tierColor};color:#06070d;font-weight:700;border-radius:999px;padding:6px 16px">TIER ${r.tier}</div>
-    </div>
-    <p style="color:#aab4c4;font-size:14px;line-height:1.6">${r.resumen||''}</p>
-    <table style="margin:14px 0;border-collapse:collapse">${row('Audiencia',dim.audiencia)}${row('Engagement',dim.engagement)}${row('Monetización',dim.monetizacion)}${row('Autoridad',dim.autoridad)}${row('Diversificación',dim.diversificacion)}${row('Madurez negocio',dim.madurez_negocio)}${row('Encaje QV',dim.encaje_qv)}</table>
-    <div style="display:flex;gap:24px;flex-wrap:wrap">
-      <div><div style="color:#22d3ee;font-size:12px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Señales</div><ul style="margin:0;padding-left:18px;font-size:13px;color:#cbd5e1">${li(r.senales_clave,'#cbd5e1')}</ul></div>
-      <div><div style="color:#f59e0b;font-size:12px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Riesgos</div><ul style="margin:0;padding-left:18px;font-size:13px;color:#cbd5e1">${li(r.riesgos,'#cbd5e1')}</ul></div>
-    </div>
-    <div style="margin-top:16px;background:#0c0e17;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px">
-      <div style="color:#22d3ee;font-size:12px;text-transform:uppercase;letter-spacing:.1em">Next step</div>
-      <div style="font-size:14px;color:#e7ecf3;margin-top:4px">${r.next_step||''}</div>
-    </div>
-    <div style="margin-top:18px;border-top:1px solid rgba(255,255,255,.08);padding-top:14px;font-size:12px;color:#8b97a8">
-      <b style="color:#aab4c4">Datos del formulario</b><br>
+  return `<div style="${EM.wrap}">
+    <div style="${EM.eyebrow}">Quantum Ventures · Nuevo lead auditado</div>
+    <h2 style="${EM.name}">${form.nombre||'—'} <span style="color:#8b97a8;font-weight:400">· ${form.nicho||''}</span></h2>
+    ${emScore(r.quantum_score, 'TIER '+r.tier, tierColor, 'Interés / encaje')}
+    <p style="${EM.para}">${r.resumen||''}</p>
+    ${emLabel('Dimensiones','#22d3ee')}
+    <table style="border-collapse:collapse;margin:0 0 26px">${emRow('Audiencia',dim.audiencia)}${emRow('Engagement',dim.engagement)}${emRow('Monetización',dim.monetizacion)}${emRow('Autoridad',dim.autoridad)}${emRow('Diversificación',dim.diversificacion)}${emRow('Madurez negocio',dim.madurez_negocio)}${emRow('Encaje QV',dim.encaje_qv)}</table>
+    ${emLabel('Señales','#22d3ee')}${emList(r.senales_clave)}
+    ${emLabel('Riesgos','#f59e0b')}${emList(r.riesgos)}
+    <div style="${EM.card}">${emLabel('Next step','#22d3ee')}<div style="font-size:15px;color:#e7ecf3;line-height:1.75">${r.next_step||''}</div></div>
+    <div style="${EM.footer}">
+      <b style="color:#aab4c4;font-size:13px">Datos del formulario</b><br>
       Email: ${form.email||'—'} · País: ${form.pais||'—'} · Handle: ${form.handle_principal||'—'}<br>
       Plataformas: IG ${form.instagram||'—'} · YT ${form.youtube||'—'} · TikTok ${form.tiktok||'—'} · Otra ${form.otra||'—'} · Eng ${form.engagement_pct||'—'}%<br>
       Monetización: ${form.monetizacion_actual||'—'} · Ingresos/mes: ${form.ingresos_aprox||'—'} · Equipo: ${form.equipo||'—'}<br>
+      Trayectoria: ${form.anios_activo||'—'} años · ${form.frecuencia||'—'} · lista ${form.lista_email||'—'} · lanzamientos ${form.lanzamientos||'—'}<br>
       Objetivo: ${form.objetivo||'—'}<br>Enlaces: ${form.enlaces||'—'}
     </div>
   </div>`;
@@ -124,34 +134,20 @@ async function scoreProduct(form) {
 
 function productEmailHtml(form, r) {
   const o=r.objetivo||{}, s=r.subjetivo||{};
-  const bar=(v)=>`<div style="background:#1b2233;border-radius:6px;height:8px;width:150px;display:inline-block;vertical-align:middle"><div style="background:linear-gradient(90deg,#22d3ee,#6366f1);height:8px;border-radius:6px;width:${Math.max(0,Math.min(100,v))}%"></div></div>`;
-  const row=(k,v)=>`<tr><td style="padding:4px 12px 4px 0;color:#8b97a8;font-size:13px">${k}</td><td style="padding:4px 0">${bar(v)} <b style="color:#e7ecf3;font-size:13px">${v}</b></td></tr>`;
-  const li=(arr)=>(arr||[]).map(x=>`<li style="margin:4px 0;color:#cbd5e1">${x}</li>`).join('');
   const vc={GO:'#22d3ee',EXPLORE:'#f59e0b',NO_GO:'#f87171'}[r.veredicto]||'#8b97a8';
-  return `<div style="font-family:Inter,Arial,sans-serif;background:#06070d;color:#e7ecf3;padding:24px;border-radius:14px;max-width:660px">
-    <div style="font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#22d3ee">Quantum Ventures · Auditoría de producto/servicio · para el Consejo</div>
-    <h2 style="margin:8px 0 2px;font-size:22px">${form.nombre||'—'} <span style="color:#8b97a8;font-weight:400">· ${form.producto||form.nicho||''}</span></h2>
-    <div style="margin:14px 0;display:flex;gap:14px;align-items:center">
-      <div style="font-size:40px;font-weight:800;color:#fff">${r.scalability_score}<span style="font-size:18px;color:#8b97a8">/100</span></div>
-      <div style="background:${vc};color:#06070d;font-weight:700;border-radius:999px;padding:6px 16px">${r.veredicto}</div>
-      <div style="color:#8b97a8;font-size:13px">Potencial de escalabilidad</div>
-    </div>
-    <p style="color:#aab4c4;font-size:14px;line-height:1.6">${r.resumen||''}</p>
-    <div style="display:flex;gap:30px;flex-wrap:wrap;margin-top:6px">
-      <div><div style="color:#22d3ee;font-size:12px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Objetivo</div><table style="border-collapse:collapse">${row('Economía unitaria',o.economia_unitaria)}${row('Ingresos / recurrencia',o.ingresos_recurrencia)}${row('Capacidad / automatización',o.capacidad_automatizacion)}${row('Mercado / demanda',o.mercado_demanda)}${row('Dependencia fundador',o.dependencia_fundador)}</table></div>
-      <div><div style="color:#a855f7;font-size:12px;text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">Subjetivo</div><table style="border-collapse:collapse">${row('Diferenciación',s.diferenciacion)}${row('Marca / autoridad',s.marca_autoridad)}${row('Madurez producto',s.madurez_producto)}${row('Ambición fundador',s.ambicion_fundador)}${row('Encaje QV',s.encaje_qv)}</table></div>
-    </div>
-    <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:16px">
-      <div><div style="color:#22d3ee;font-size:12px;text-transform:uppercase;letter-spacing:.1em">Palancas</div><ul style="margin:4px 0;padding-left:18px;font-size:13px">${li(r.palancas)}</ul></div>
-      <div><div style="color:#f59e0b;font-size:12px;text-transform:uppercase;letter-spacing:.1em">Cuellos de botella</div><ul style="margin:4px 0;padding-left:18px;font-size:13px">${li(r.cuellos_botella)}</ul></div>
-    </div>
-    <div style="margin-top:16px;background:#0c0e17;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px">
-      <div style="color:#22d3ee;font-size:12px;text-transform:uppercase;letter-spacing:.1em">Recomendación para el consejo</div>
-      <div style="font-size:14px;color:#e7ecf3;margin-top:4px">${r.recomendacion_consejo||''}</div>
-    </div>
-    <div style="margin-top:18px;border-top:1px solid rgba(255,255,255,.08);padding-top:14px;font-size:12px;color:#8b97a8">
-      <b style="color:#aab4c4">Datos del formulario</b><br>${Object.entries(form).map(([k,v])=>`${k}: ${v}`).join(' · ')}
-    </div>
+  return `<div style="${EM.wrap}">
+    <div style="${EM.eyebrow}">Quantum Ventures · Auditoría de producto/servicio · para el Consejo</div>
+    <h2 style="${EM.name}">${form.nombre||'—'} <span style="color:#8b97a8;font-weight:400">· ${form.producto||form.nicho||''}</span></h2>
+    ${emScore(r.scalability_score, r.veredicto, vc, 'Potencial de escalabilidad')}
+    <p style="${EM.para}">${r.resumen||''}</p>
+    ${emLabel('Criterios objetivos','#22d3ee')}
+    <table style="border-collapse:collapse;margin:0 0 24px">${emRow('Economía unitaria',o.economia_unitaria)}${emRow('Ingresos / recurrencia',o.ingresos_recurrencia)}${emRow('Capacidad / automatización',o.capacidad_automatizacion)}${emRow('Mercado / demanda',o.mercado_demanda)}${emRow('Dependencia fundador',o.dependencia_fundador)}</table>
+    ${emLabel('Criterios subjetivos','#a855f7')}
+    <table style="border-collapse:collapse;margin:0 0 26px">${emRow('Diferenciación',s.diferenciacion)}${emRow('Marca / autoridad',s.marca_autoridad)}${emRow('Madurez producto',s.madurez_producto)}${emRow('Ambición fundador',s.ambicion_fundador)}${emRow('Encaje QV',s.encaje_qv)}</table>
+    ${emLabel('Palancas de crecimiento','#22d3ee')}${emList(r.palancas)}
+    ${emLabel('Cuellos de botella','#f59e0b')}${emList(r.cuellos_botella)}
+    <div style="${EM.card}">${emLabel('Recomendación para el consejo','#22d3ee')}<div style="font-size:15px;color:#e7ecf3;line-height:1.75">${r.recomendacion_consejo||''}</div></div>
+    <div style="${EM.footer}"><b style="color:#aab4c4;font-size:13px">Datos del formulario</b><br>${Object.entries(form).map(([k,v])=>`${k}: ${v}`).join(' · ')}</div>
   </div>`;
 }
 
@@ -192,4 +188,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml };

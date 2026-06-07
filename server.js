@@ -100,6 +100,16 @@ async function logSheet(tab, row) {
     if (!r.ok) console.error('sheet log', tab, r.status, await r.text());
   } catch (e) { console.error('sheet log error:', e.message); }
 }
+async function sheetRead(tab, range) {
+  if (!SHEET_ID) return [];
+  try {
+    const token = await gmailToken();
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(tab+'!'+range)}`;
+    const r = await fetch(url, { headers:{Authorization:`Bearer ${token}`} });
+    if (!r.ok) { console.error('sheet read', tab, r.status); return []; }
+    const j = await r.json(); return j.values || [];
+  } catch (e) { console.error('sheet read error:', e.message); return []; }
+}
 const nowES = () => { try { return new Date().toLocaleString('es-ES',{timeZone:'Europe/Madrid'}); } catch(e){ return new Date().toISOString(); } };
 
 async function sendHtmlMail(token, subject, html, avatar) {
@@ -325,10 +335,40 @@ function venueEmailHtml(form) {
 
 async function handleVenue(form) {
   if(!form || !form.venue || !(form.phone||form.email)) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const ref = (form.ref||'').trim();
   const token = await gmailToken();
-  await sendHtmlMail(token, `Venue lead (Bali) · ${form.venue||''}${form.type?(' — '+form.type):''}`, venueEmailHtml(form), null);
-  await logSheet('Venues', [nowES(), form.venue||'', form.type||'', form.contact_name||'', form.phone||'', form.email||'', form.location||'', form.premium_brand||'', form.premium_volume||'', form.premium_supplier||'', form.premium_price||'', form.canned_brand||'', form.canned_volume||'', form.canned_supplier||'', form.canned_price||'', form.notes||'']);
+  await sendHtmlMail(token, `Venue lead (Bali) · ${form.venue||''}${form.type?(' — '+form.type):''}${ref?(' · ref:'+ref):''}`, venueEmailHtml(form), null);
+  await logSheet('Venues', [nowES(), form.venue||'', form.type||'', form.contact_name||'', form.phone||'', form.email||'', form.location||'', form.premium_brand||'', form.premium_volume||'', form.premium_supplier||'', form.premium_price||'', form.canned_brand||'', form.canned_volume||'', form.canned_supplier||'', form.canned_price||'', form.notes||'', ref]);
   return { ok:true };
+}
+
+// ===== Ambassadors (influencers que representan la marca) — alta + listado para prueba social =====
+function slugCode(s){ return (''+(s||'')).toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,16); }
+const isApproved = (v)=>['approved','aprobado','si','sí','true','1','yes','y','on'].includes((''+(v||'')).trim().toLowerCase());
+
+async function handleAmbassador(form) {
+  if(!form || !form.handle) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const platform = (form.plataforma||'instagram').toLowerCase().trim();
+  const handle = (form.handle||'').replace(/^@/,'').replace(/.*\//,'').trim();
+  const code = slugCode(form.code || handle);
+  const estado = isApproved(form.aprobado!==undefined?form.aprobado:'approved') ? 'approved' : 'pending';
+  await logSheet('Ambassadors', [nowES(), form.nombre||'', platform, handle, form.nicho||'', form.followers||'', code, estado, form.notas||'']);
+  try { const token = await gmailToken(); await sendHtmlMail(token, `Embajador ${estado} · ${form.nombre||handle} (@${handle})`, `<div style="${EM.wrap}">${emHeader('Quantum Ventures · Nuevo embajador',form.nombre||('@'+handle),platform,false)}<p style="${EM.para}">Estado: <b style="color:#22d3ee">${estado}</b> · Código: <b>${code}</b> · Nicho: ${form.nicho||'—'} · Followers: ${form.followers||'—'}</p><div style="${EM.footer}">Si está approved, ya aparece en la web y formularios (prueba social). Link de referido: quantumventures.io/bali/supply?ref=${code}</div></div>`, null); } catch(e){ console.error('amb email', e.message); }
+  return { ok:true, code, estado };
+}
+
+async function getAmbassadors() {
+  const rows = await sheetRead('Ambassadors', 'A2:I1000');
+  const seen = new Set(); const out = [];
+  for (const r of rows) {
+    if ((r[7]||'').trim().toLowerCase() !== 'approved') continue;
+    const platform = (r[2]||'instagram').toLowerCase().trim();
+    const handle = (r[3]||'').replace(/^@/,'').trim();
+    if (!handle || seen.has(platform+'/'+handle)) continue;
+    seen.add(platform+'/'+handle);
+    out.push({ name:r[1]||'', platform, handle, niche:r[4]||'', code:r[6]||'', avatar:`https://unavatar.io/${platform}/${encodeURIComponent(handle)}` });
+  }
+  return out;
 }
 
 // ===== Cliente: crea estructura de carpetas en Drive + comparte =====
@@ -365,12 +405,17 @@ async function handleCliente(form) {
 if (require.main === module) {
   const server = http.createServer((req,res)=>{
     res.setHeader('Access-Control-Allow-Origin', CORS);
-    res.setHeader('Access-Control-Allow-Methods','POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers','Content-Type');
     if(req.method==='OPTIONS'){ res.writeHead(204); return res.end(); }
     if(req.method==='GET' && req.url==='/health'){ res.writeHead(200,{'Content-Type':'application/json'}); return res.end('{"ok":true}'); }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : handleAudit;
+    if(req.method==='GET' && req.url==='/api/ambassadors'){
+      getAmbassadors().then(list=>{ res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'public, max-age=120'}); res.end(JSON.stringify(list)); })
+        .catch(e=>{ console.error('ambassadors error:', e.message); res.writeHead(200,{'Content-Type':'application/json'}); res.end('[]'); });
+      return;
+    }
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }
@@ -383,4 +428,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead };

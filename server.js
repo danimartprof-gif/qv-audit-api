@@ -300,6 +300,37 @@ Devuelve en español, estructurado y conciso: 1) QUIÉN ES (2-3 líneas); 2) LIN
   return { ok:true, enriched: !!enrich };
 }
 
+// ===== Venue lead (Bali) — captación de hoteles/restaurantes para suministro de agua =====
+function venueEmailHtml(form) {
+  const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
+  return `<div style="${EM.wrap}">
+    ${emHeader('Tigris × Quantum Ventures · New venue lead (Bali)', form.venue||'—', form.type||'', false)}
+    <p style="${EM.para}">A venue in Bali submitted its current water supply. The team should follow up.</p>
+    ${emLabel('Contact','#22d3ee')}
+    <table style="border-collapse:collapse;margin:0 0 22px">
+      ${row('Venue', form.venue)}${row('Type', form.type)}${row('Contact', form.contact_name)}${row('Phone / WhatsApp', form.phone)}${row('Email', form.email)}${row('Area / location', form.location)}
+    </table>
+    ${emLabel('Premium bottled water (current)','#22d3ee')}
+    <table style="border-collapse:collapse;margin:0 0 22px">
+      ${row('Brand', form.premium_brand)}${row('Monthly volume', form.premium_volume)}${row('Current supplier', form.premium_supplier)}${row('Price paid', form.premium_price)}
+    </table>
+    ${emLabel('Canned still water (current)','#a855f7')}
+    <table style="border-collapse:collapse;margin:0 0 22px">
+      ${row('Brand', form.canned_brand)}${row('Monthly volume', form.canned_volume)}${row('Current supplier', form.canned_supplier)}${row('Price paid', form.canned_price)}
+    </table>
+    ${form.notes?`<div style="${EM.card}">${emLabel('Notes','#22d3ee')}<div style="font-size:14px;color:#e7ecf3;line-height:1.7">${(''+form.notes).replace(/</g,'&lt;')}</div></div>`:''}
+    <div style="${EM.footer}">Lead captured via quantumventures.io/bali/supply · saved to the tracking sheet (Venues tab).</div>
+  </div>`;
+}
+
+async function handleVenue(form) {
+  if(!form || !form.venue || !(form.phone||form.email)) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const token = await gmailToken();
+  await sendHtmlMail(token, `Venue lead (Bali) · ${form.venue||''}${form.type?(' — '+form.type):''}`, venueEmailHtml(form), null);
+  await logSheet('Venues', [nowES(), form.venue||'', form.type||'', form.contact_name||'', form.phone||'', form.email||'', form.location||'', form.premium_brand||'', form.premium_volume||'', form.premium_supplier||'', form.premium_price||'', form.canned_brand||'', form.canned_volume||'', form.canned_supplier||'', form.canned_price||'', form.notes||'']);
+  return { ok:true };
+}
+
 // ===== Cliente: crea estructura de carpetas en Drive + comparte =====
 const CLIENT_SUBFOLDERS = ['00 · Marca (branding previo)','01 · Negocio','02 · Contenido (emails y landings)','03 · Fotos y vídeo','04 · Legal y fiscal','05 · Entregables QV'];
 
@@ -338,8 +369,8 @@ if (require.main === module) {
     res.setHeader('Access-Control-Allow-Headers','Content-Type');
     if(req.method==='OPTIONS'){ res.writeHead(204); return res.end(); }
     if(req.method==='GET' && req.url==='/health'){ res.writeHead(200,{'Content-Type':'application/json'}); return res.end('{"ok":true}'); }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : handleAudit;
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }
@@ -352,4 +383,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue };

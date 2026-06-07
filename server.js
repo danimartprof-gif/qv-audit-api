@@ -314,7 +314,7 @@ function venueEmailHtml(form) {
     <table style="border-collapse:collapse;margin:0 0 22px">
       ${row('Brand', form.premium_brand)}${row('Monthly volume', form.premium_volume)}${row('Current supplier', form.premium_supplier)}${row('Price paid', form.premium_price)}
     </table>
-    ${emLabel('Canned still water (current)','#a855f7')}
+    ${emLabel('Gallon &amp; everyday water (current)','#a855f7')}
     <table style="border-collapse:collapse;margin:0 0 22px">
       ${row('Brand', form.canned_brand)}${row('Monthly volume', form.canned_volume)}${row('Current supplier', form.canned_supplier)}${row('Price paid', form.canned_price)}
     </table>

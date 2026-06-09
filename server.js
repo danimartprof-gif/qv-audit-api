@@ -172,7 +172,8 @@ function emailHtml(form, r, hasAvatar) {
       Plataformas: IG ${form.instagram||'—'} · YT ${form.youtube||'—'} · TikTok ${form.tiktok||'—'} · Otra ${form.otra||'—'} · Eng ${form.engagement_pct||'—'}%<br>
       Monetización: ${form.monetizacion_actual||'—'} · Ingresos/mes: ${form.ingresos_aprox||'—'} · Equipo: ${form.equipo||'—'}<br>
       Trayectoria: ${form.anios_activo||'—'} años · ${form.frecuencia||'—'} · lista ${form.lista_email||'—'} · lanzamientos ${form.lanzamientos||'—'}<br>
-      Objetivo: ${form.objetivo||'—'}<br>Enlaces: ${form.enlaces||'—'}
+      Objetivo: ${form.objetivo||'—'}<br>Enlaces: ${form.enlaces||'—'}<br>
+      <b style="color:#aab4c4">Web:</b> Dominio: ${form.dominio||'—'} (${form.dominio_registrador||'—'}) · Web actual: ${form.web_actual||'—'} · Branding: ${form.branding||'—'}${form.web_objetivo?`<br>Quiere transmitir: ${form.web_objetivo}`:''}
     </div>
   </div>`;
 }
@@ -185,12 +186,52 @@ async function sendEmail(form, rating) {
   await sendHtmlMail(token, subject, html, avatar);
 }
 
+// Materiales que pedimos al cliente para construir su web de marca personal
+function webMaterialsEmailHtml(form, folderUrl) {
+  const li = (t)=>`<li style="margin:0 0 9px;color:#cbd5e1;font-size:14px;line-height:1.7">${t}</li>`;
+  return `<div style="${EM.wrap}">
+    ${emHeader('Quantum Ventures · Tu web de marca personal', form.nombre||'—', form.nicho||'', false)}
+    <p style="${EM.para}">Hemos recibido tu auditoría. Para montar tu web de marca personal hemos creado un <b style="color:#e7ecf3">espacio privado en Drive</b> solo para ti. Sube ahí todo lo que puedas y nosotros nos encargamos del resto (diseño, desarrollo y conexión de tu dominio a nuestros servidores).</p>
+    <div style="${EM.card}">${emLabel('Tu carpeta privada','#22d3ee')}<div style="font-size:14px"><a href="${folderUrl}" style="color:#22d3ee">${folderUrl}</a></div></div>
+    ${emLabel('Lo que necesitamos de ti','#22d3ee')}
+    <ul style="margin:0 0 22px;padding-left:20px">
+      ${li('<b>Dominio:</b> '+(form.dominio&&form.dominio.toLowerCase()!=='no tengo'?`${form.dominio} — danos acceso al panel de ${form.dominio_registrador||'tu registrador'} (o los DNS) para conectarlo.`:'si no tienes, te lo registramos nosotros.'))}
+      ${li('<b>Logo y branding:</b> logo en alta calidad, colores y tipografías si los tienes.')}
+      ${li('<b>Fotos y vídeos tuyos:</b> retratos, entrenando, lifestyle, en buena calidad.')}
+      ${li('<b>Textos:</b> quién eres, tu historia, a quién ayudas y tu promesa.')}
+      ${li('<b>Servicios / productos:</b> qué vendes, precios y qué incluye cada uno.')}
+      ${li('<b>Pruebas sociales:</b> testimonios, antes/después, resultados de clientes, logos de marcas.')}
+      ${li('<b>Redes y enlaces:</b> Instagram, YouTube, TikTok, WhatsApp, etc.')}
+      ${li('<b>Referencias:</b> 2-3 webs que te gusten (de estilo o de competencia).')}
+    </ul>
+    <div style="${EM.footer}">Cualquier duda, responde a este email. — Equipo Quantum Ventures</div>
+  </div>`;
+}
+async function sendClientMail(token, to, subject, html) {
+  const head = [`From: Quantum Ventures <${SENDER}>`, `To: ${to}`, `Bcc: ${RECIPIENTS}`, `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=UTF-8', '', html];
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({raw:b64url(head.join('\r\n'))})});
+  if (!r.ok) throw new Error('gmail client send '+r.status+' '+await r.text());
+}
+// Al recibir la auditoría de marca personal: crea espacio Drive del cliente + le pide los materiales de la web
+async function autoOnboardWeb(form) {
+  if (!CLIENTS_FOLDER) { console.error('autoOnboard: no CLIENTS_FOLDER'); return; }
+  const token = await gmailToken();
+  const root = await driveCreateFolder(token, form.nombre.trim(), CLIENTS_FOLDER);
+  for (const sub of CLIENT_SUBFOLDERS) { try { await driveCreateFolder(token, sub, root.id); } catch(e){ console.error('subfolder', sub, e.message); } }
+  if (form.email) { try { await driveShare(token, root.id, form.email.trim()); } catch(e){ console.error('share', e.message); } }
+  await logSheet('Clientes', [nowES(), form.nombre, form.email||'', root.webViewLink||'', form.dominio||'', 'web-auditoria']);
+  try { await sendClientMail(token, form.email.trim(), `Tu web de marca personal · ${form.nombre} — siguientes pasos`, webMaterialsEmailHtml(form, root.webViewLink)); } catch(e){ console.error('web materials mail', e.message); }
+  return root.webViewLink;
+}
+
 async function handleAudit(form) {
   if(!form || !form.nombre || !form.email) { const e=new Error('missing fields'); e.code=400; throw e; }
   const rating = await score(form);
   await sendEmail(form, rating);
-  await logSheet('Interes', [nowES(), form.nombre, form.email, form.nicho||'', form.handle_principal||'', form.instagram||'', form.youtube||'', form.tiktok||'', form.engagement_pct||'', form.monetizacion_actual||'', form.ingresos_aprox||'', form.equipo||'', form.objetivo||'', rating.tier, rating.quantum_score, rating.resumen||'']);
-  return { ok:true, tier:rating.tier, score:rating.quantum_score };
+  await logSheet('Interes', [nowES(), form.nombre, form.email, form.nicho||'', form.handle_principal||'', form.instagram||'', form.youtube||'', form.tiktok||'', form.engagement_pct||'', form.monetizacion_actual||'', form.ingresos_aprox||'', form.equipo||'', form.objetivo||'', rating.tier, rating.quantum_score, rating.resumen||'', form.dominio||'', form.web_actual||'']);
+  let folder = '';
+  try { folder = await autoOnboardWeb(form) || ''; } catch(e){ console.error('autoOnboardWeb error:', e.message); }
+  return { ok:true, tier:rating.tier, score:rating.quantum_score, folder };
 }
 
 async function scoreProduct(form) {

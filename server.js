@@ -224,11 +224,69 @@ async function autoOnboardWeb(form) {
   return root.webViewLink;
 }
 
+// ===== Respuesta automática al influencer al recibir cada auditoría =====
+const AUDIT_FORMS = {
+  marca:    { tab:'Interes',  label:'tu auditoría de marca personal',        otherLabel:'la auditoría de tu producto o servicio', otherUrl:'https://quantumventures.io/auditoria-servicio' },
+  producto: { tab:'Producto', label:'la auditoría de tu producto o servicio', otherLabel:'tu auditoría de marca personal',          otherUrl:'https://quantumventures.io/auditoria' }
+};
+async function emailInTab(tab, email) {
+  const e = (''+(email||'')).trim().toLowerCase();
+  if (!e) return false;
+  const rows = await sheetRead(tab, 'A2:C');
+  return rows.some(r => (''+(r[2]||'')).trim().toLowerCase() === e);
+}
+const emBtn = (href,txt)=>`<a href="${href}" style="display:inline-block;background:linear-gradient(100deg,#22d3ee,#6366f1);color:#06070d;font-weight:700;border-radius:999px;padding:13px 26px;text-decoration:none;font-size:15px">${txt}</a>`;
+const emStep = (n,done,txt)=>`<tr><td style="padding:6px 12px 6px 0;vertical-align:middle"><span style="display:inline-block;width:26px;height:26px;line-height:26px;text-align:center;border-radius:50%;font-size:13px;font-weight:700;${done?'background:linear-gradient(100deg,#22d3ee,#6366f1);color:#06070d':'background:#1b2233;color:#8b97a8;border:1px solid rgba(255,255,255,.14)'}">${done?'✓':n}</span></td><td style="padding:6px 0;color:${done?'#e7ecf3':'#9aa6b8'};font-size:14.5px;vertical-align:middle">${txt}${done?' <span style="color:#34d399;font-size:13px">· recibida</span>':''}</td></tr>`;
+function ackReceivedHtml(form, kind) {
+  const cfg = AUDIT_FORMS[kind];
+  const first = ((form.nombre||'').trim().split(/\s+/)[0]) || 'Hola';
+  return `<div style="${EM.wrap}">
+    ${emHeader('Quantum Ventures · Auditoría privada', first, 'paso recibido', false)}
+    <p style="${EM.para}">Hemos recibido ${cfg.label} ✓. Nuestro equipo ya la tiene y la analizará de forma privada.</p>
+    <div style="${EM.card}">
+      ${emLabel('Tu auditoría, en dos pasos','#22d3ee')}
+      <table style="border-collapse:collapse;margin:0 0 16px">${kind==='marca'?emStep(1,true,'Marca personal')+emStep(2,false,'Producto o servicio'):emStep(1,false,'Marca personal')+emStep(2,true,'Producto o servicio')}</table>
+      <p style="color:#aab4c4;font-size:14px;line-height:1.7;margin:0 0 18px">Te falta un paso: completa también ${cfg.otherLabel}. Juntas nos dan la foto completa de tu marca y tu negocio — y con eso te preparamos el análisis y los siguientes pasos.</p>
+      ${emBtn(cfg.otherUrl,'Completar el paso que falta →')}
+    </div>
+    <div style="${EM.footer}">En cuanto tengamos los dos pasos, te respondemos a este email con tus resultados.<br>— Equipo Quantum Ventures · quantumventures.io</div>
+  </div>`;
+}
+function ackCompleteHtml(form) {
+  const first = ((form.nombre||'').trim().split(/\s+/)[0]) || 'Hola';
+  return `<div style="${EM.wrap}">
+    ${emHeader('Quantum Ventures · Auditoría completa', first, 'los dos pasos recibidos', false)}
+    <p style="${EM.para}">Tu auditoría está <b style="color:#e7ecf3">completa</b> ✓✓. Ya tenemos los dos pasos — tu marca personal y tu producto o servicio — y nuestro equipo está analizando tu caso en privado.</p>
+    <div style="${EM.card}">
+      ${emLabel('Qué pasa ahora','#22d3ee')}
+      <ul style="margin:0;padding-left:20px">
+        <li style="margin:0 0 9px;color:#cbd5e1;font-size:14px;line-height:1.7">Analizamos tu marca, tu audiencia y tu negocio con nuestro sistema.</li>
+        <li style="margin:0 0 9px;color:#cbd5e1;font-size:14px;line-height:1.7">Medimos la brecha entre tu monetización actual y tu potencial real.</li>
+        <li style="margin:0;color:#cbd5e1;font-size:14px;line-height:1.7">Te respondemos a este email con tus resultados y los siguientes pasos.</li>
+      </ul>
+    </div>
+    <p style="${EM.para}">No tienes que hacer nada más. Si quieres adelantarnos algo, responde a este email.</p>
+    <div style="${EM.footer}">— Equipo Quantum Ventures · quantumventures.io</div>
+  </div>`;
+}
+async function sendAuditAck(form, kind) {
+  if (!form.email) return;
+  const cfg = AUDIT_FORMS[kind];
+  const otherTab = kind==='marca' ? AUDIT_FORMS.producto.tab : AUDIT_FORMS.marca.tab;
+  const complete = await emailInTab(otherTab, form.email);
+  const token = await gmailToken();
+  const first = ((form.nombre||'').trim().split(/\s+/)[0]) || '';
+  const subject = complete ? `${first?first+', tu':'Tu'} auditoría está completa ✓ — ya estamos analizando tu caso`
+                           : `Hemos recibido ${kind==='marca'?'tu auditoría de marca personal':'la auditoría de tu producto'} ✓ — te falta 1 paso`;
+  await sendClientMail(token, form.email.trim(), subject, complete ? ackCompleteHtml(form) : ackReceivedHtml(form, kind));
+}
+
 async function handleAudit(form) {
   if(!form || !form.nombre || !form.email) { const e=new Error('missing fields'); e.code=400; throw e; }
   const rating = await score(form);
   await sendEmail(form, rating);
   await logSheet('Interes', [nowES(), form.nombre, form.email, form.nicho||'', form.handle_principal||'', form.instagram||'', form.youtube||'', form.tiktok||'', form.engagement_pct||'', form.monetizacion_actual||'', form.ingresos_aprox||'', form.equipo||'', form.objetivo||'', rating.tier, rating.quantum_score, rating.resumen||'', form.dominio||'', form.web_actual||'']);
+  try { await sendAuditAck(form, 'marca'); } catch(e){ console.error('ack marca error:', e.message); }
   let folder = '';
   try { folder = await autoOnboardWeb(form) || ''; } catch(e){ console.error('autoOnboardWeb error:', e.message); }
   return { ok:true, tier:rating.tier, score:rating.quantum_score, folder };
@@ -275,6 +333,7 @@ async function handleProduct(form) {
   const rating = await scoreProduct(form);
   await sendProductEmail(form, rating);
   await logSheet('Producto', [nowES(), form.nombre, form.email, form.nicho_label||form.nicho||'', form.producto||'', form.precio||'', form.margen||'', form.ingresos_mes||'', form.recurrencia||'', rating.veredicto, rating.scalability_score, rating.resumen||'', rating.recomendacion_consejo||'']);
+  try { await sendAuditAck(form, 'producto'); } catch(e){ console.error('ack producto error:', e.message); }
   return { ok:true, veredicto:rating.veredicto, score:rating.scalability_score };
 }
 
@@ -449,7 +508,7 @@ if (require.main === module) {
     res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers','Content-Type');
     if(req.method==='OPTIONS'){ res.writeHead(204); return res.end(); }
-    if(req.method==='GET' && req.url==='/health'){ res.writeHead(200,{'Content-Type':'application/json'}); return res.end('{"ok":true}'); }
+    if(req.method==='GET' && req.url==='/health'){ res.writeHead(200,{'Content-Type':'application/json'}); return res.end('{"ok":true,"v":"ack-1"}'); }
     if(req.method==='GET' && req.url==='/api/ambassadors'){
       getAmbassadors().then(list=>{ res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'public, max-age=120'}); res.end(JSON.stringify(list)); })
         .catch(e=>{ console.error('ambassadors error:', e.message); res.writeHead(200,{'Content-Type':'application/json'}); res.end('[]'); });
@@ -469,4 +528,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead, sendAuditAck, ackReceivedHtml, ackCompleteHtml, emailInTab };

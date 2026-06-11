@@ -406,6 +406,53 @@ async function handleVilla(form) {
   return { ok:true };
 }
 
+// ===== Jaan España — pipeline de venues (form + CRM real) =====
+const JAAN_SHEET = process.env.JAAN_SHEET_ID || '';
+const JAAN_KEY = process.env.JAAN_KEY || '';
+const JAAN_STAGES = ['Nuevo contacto','Análisis completado','Interesado','Muestras / piloto','Propuesta formal','Negociación','GANADO','Descartado'];
+function jaanEmailHtml(form, id) {
+  const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
+  return `<div style="${EM.wrap}">
+    ${emHeader('Jaan España · Nuevo venue en el pipeline', form.local||'—', form.ciudad||'', false)}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Tipo',form.tipo)}${row('Contacto',(form.contacto||'')+(form.cargo?(' · '+form.cargo):''))}${row('Email',form.email)}${row('Teléfono/WhatsApp',form.telefono)}${row('Agua premium actual',form.agua_actual)}${row('Coste botella',form.coste)}${row('PVP en mesa',form.pvp)}${row('Consumo mensual',form.consumo)}${row('Interés',form.interes)}${row('Referido por',form.referido)}${row('Comentarios',form.comentarios)}</table>
+    <div style="${EM.footer}">ID ${id} · Etapa inicial: Nuevo contacto · CRM: quantumventures.io/crm-jaan · Hoja "Jaan España — Pipeline de venues"</div>
+  </div>`;
+}
+async function handleJaanVenue(form) {
+  if(!form || !form.local || !form.contacto) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const token = await gmailToken();
+  const id = 'V'+Date.now().toString(36).toUpperCase();
+  if (JAAN_SHEET) {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${JAAN_SHEET}/values/${encodeURIComponent('Pipeline')}!A1:append?valueInputOption=RAW`;
+    const row = [id, nowES(), 'Nuevo contacto', form.local||'', form.tipo||'', form.ciudad||'', form.contacto||'', form.cargo||'', form.email||'', form.telefono||'', form.agua_actual||'', form.coste||'', form.pvp||'', form.consumo||'', form.interes||'', form.referido||'Magalis', form.comentarios||''];
+    const r = await fetch(url, { method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({ values:[row] }) });
+    if (!r.ok) console.error('jaan sheet', r.status, await r.text());
+  }
+  try { await sendHtmlMail(token, `Jaan 💧 Nuevo venue: ${form.local} (${form.ciudad||'—'})`, jaanEmailHtml(form, id), null); } catch(e){ console.error('jaan mail', e.message); }
+  return { ok:true, id };
+}
+async function handleJaanPipeline(key) {
+  if (!JAAN_KEY || key !== JAAN_KEY) { const e=new Error('forbidden'); e.code=403; throw e; }
+  const token = await gmailToken();
+  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${JAAN_SHEET}/values/${encodeURIComponent('Pipeline')}!A2:Q500`, { headers:{Authorization:`Bearer ${token}`} });
+  const j = r.ok ? await r.json() : {};
+  const H2 = ['id','fecha','etapa','local','tipo','ciudad','contacto','cargo','email','telefono','agua_actual','coste','pvp','consumo','interes','referido','comentarios'];
+  return { ok:true, stages: JAAN_STAGES, leads: (j.values||[]).map(v=>Object.fromEntries(H2.map((h,i)=>[h, v[i]||'']))) };
+}
+async function handleJaanStage(form) {
+  if (!JAAN_KEY || form.k !== JAAN_KEY) { const e=new Error('forbidden'); e.code=403; throw e; }
+  if (!form.id || !JAAN_STAGES.includes(form.etapa)) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const token = await gmailToken();
+  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${JAAN_SHEET}/values/${encodeURIComponent('Pipeline')}!A1:A500`, { headers:{Authorization:`Bearer ${token}`} });
+  const vals = r.ok ? (await r.json()).values||[] : [];
+  const idx = vals.findIndex(v=>(v[0]||'')===form.id);
+  if (idx < 0) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const u = `https://sheets.googleapis.com/v4/spreadsheets/${JAAN_SHEET}/values/${encodeURIComponent('Pipeline')}!C${idx+1}?valueInputOption=RAW`;
+  const r2 = await fetch(u, { method:'PUT', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({ values:[[form.etapa]] }) });
+  if (!r2.ok) throw new Error('stage update '+r2.status);
+  return { ok:true };
+}
+
 // ===== Contactos (CRM personal) con enriquecimiento por búsqueda web (Gemini grounding) =====
 async function geminiSearch(prompt) {
   const token = await vertexToken();
@@ -551,12 +598,18 @@ if (require.main === module) {
         .catch(e=>{ console.error('ambassadors error:', e.message); res.writeHead(200,{'Content-Type':'application/json'}); res.end('[]'); });
       return;
     }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : handleAudit;
+    if(req.method==='GET' && req.url.startsWith('/api/jaan-pipeline')){
+      const key = new URL(req.url, 'http://x').searchParams.get('k') || '';
+      handleJaanPipeline(key).then(out=>{ res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); })
+        .catch(e=>{ const code=e.code===403?403:500; res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:code===403?'forbidden':'internal'})); });
+      return;
+    }
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa' || req.url==='/api/jaan-venue' || req.url==='/api/jaan-stage')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : req.url==='/api/jaan-venue' ? handleJaanVenue : req.url==='/api/jaan-stage' ? handleJaanStage : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }
-        catch(e){ const code=e.code===400?400:500; console.error('audit error:', e.message); res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:code===400?'missing fields':'internal'})); }
+        catch(e){ const code=e.code===400?400:e.code===403?403:500; console.error('audit error:', e.message); res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:code===400?'missing fields':code===403?'forbidden':'internal'})); }
       });
       return;
     }

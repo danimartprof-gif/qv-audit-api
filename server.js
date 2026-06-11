@@ -369,6 +369,43 @@ async function handleFiscal(form) {
   return { ok:true };
 }
 
+// ===== Proyecto Villa Brisa (Bali) — formulario de propiedades =====
+const VILLA_SHEET = process.env.VILLA_SHEET_ID || '';
+function villaEmailHtml(form) {
+  const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
+  return `<div style="${EM.wrap}">
+    ${emHeader('Proyecto Villa Brisa · Ficha de propiedad', form.villa||'—', form.modalidad||'', false)}
+    ${emLabel('La villa','#22d3ee')}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Ubicación',form.ubicacion)}${row('Enlaces',form.enlaces)}${row('Habitaciones / Baños',(form.habitaciones||'—')+' / '+(form.banos||'—'))}${row('Huéspedes',form.huespedes)}${row('M2',form.m2)}${row('Piscina y extras',form.extras)}</table>
+    ${emLabel('Servicios y situación actual','#22d3ee')}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Servicios incluidos',form.servicios)}${row('¿Alquilada ahora?',form.alquilada)}${row('Canales actuales',form.canales)}${row('Precio actual',form.precio_actual)}${row('Ocupación',form.ocupacion)}${row('Licencia turística',form.licencia)}</table>
+    ${emLabel('Modelo deseado','#a855f7')}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Modalidad',form.modalidad)}${row('Precio objetivo',form.precio_objetivo)}${row('Estancia mínima',form.estancia_min)}${row('Disponibilidad',form.disponibilidad)}${row('Restricciones',form.restricciones)}</table>
+    ${emLabel('Colaboración con agencias','#34d399')}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Tipo de acuerdo',form.tipo_acuerdo)}${row('% / condiciones',form.condiciones)}${row('Exclusividad',form.exclusividad)}${row('Mercados objetivo',form.mercados)}${row('Qué debe cubrir la agencia',form.cobertura)}${row('Objetivo ingresos/mes',form.objetivo_ingresos)}</table>
+    <div style="${EM.footer}">Contacto: ${form.contacto||'—'} · ${form.email||'—'} · ${form.telefono||'—'}<br>${form.comentarios?('Comentarios: '+form.comentarios+'<br>'):''}Guardado en la hoja "Villa Brisa — Formularios de propiedades" (Drive del proyecto).</div>
+  </div>`;
+}
+async function handleVilla(form) {
+  if(!form || !form.villa || !form.email) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const token = await gmailToken();
+  await sendHtmlMail(token, `Villa Brisa · Ficha recibida — ${form.villa} (${form.modalidad||''})`, villaEmailHtml(form), null);
+  if (VILLA_SHEET) {
+    try {
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${VILLA_SHEET}/values/${encodeURIComponent('Villas')}!A1:append?valueInputOption=RAW`;
+      const row = [nowES(), form.villa||'', form.ubicacion||'', form.enlaces||'', form.habitaciones||'', form.banos||'', form.huespedes||'', form.m2||'', form.extras||'', form.servicios||'', form.alquilada||'', form.canales||'', form.precio_actual||'', form.ocupacion||'', form.licencia||'', form.modalidad||'', form.precio_objetivo||'', form.estancia_min||'', form.disponibilidad||'', form.restricciones||'', form.tipo_acuerdo||'', form.condiciones||'', form.exclusividad||'', form.mercados||'', form.cobertura||'', form.objetivo_ingresos||'', form.contacto||'', form.email||'', form.telefono||'', form.comentarios||''];
+      const r = await fetch(url, { method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'}, body:JSON.stringify({ values:[row] }) });
+      if (!r.ok) console.error('villa sheet', r.status, await r.text());
+    } catch(e){ console.error('villa sheet error:', e.message); }
+  }
+  try { await sendClientMail(token, form.email.trim(), `Hemos recibido la ficha de ${form.villa} ✓ — Proyecto Villa Brisa`,
+    `<div style="${EM.wrap}">${emHeader('Proyecto Villa Brisa · Bali', (form.contacto||'').split(/\s+/)[0]||'Hola', 'ficha recibida', false)}
+    <p style="${EM.para}">Hemos recibido la ficha de <b style="color:#e7ecf3">${form.villa}</b> ✓. Con esta información preparamos el dossier de la propiedad y arrancamos la búsqueda de agencias partner en los mercados que nos has indicado (${form.mercados||'por definir'}).</p>
+    <p style="${EM.para}">Si tienes la segunda villa pendiente, rellena también su ficha — cada propiedad lleva su propio dossier.</p>
+    <div style="${EM.footer}">— Equipo del proyecto · te contactaremos con los siguientes pasos</div></div>`); } catch(e){ console.error('villa ack', e.message); }
+  return { ok:true };
+}
+
 // ===== Contactos (CRM personal) con enriquecimiento por búsqueda web (Gemini grounding) =====
 async function geminiSearch(prompt) {
   const token = await vertexToken();
@@ -514,8 +551,8 @@ if (require.main === module) {
         .catch(e=>{ console.error('ambassadors error:', e.message); res.writeHead(200,{'Content-Type':'application/json'}); res.end('[]'); });
       return;
     }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : handleAudit;
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }

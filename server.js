@@ -406,6 +406,48 @@ async function handleVilla(form) {
   return { ok:true };
 }
 
+// ===== Brave The World — auditoría de negocio =====
+function braveEmailHtml(f) {
+  return `<div style="${EM.wrap}">
+    ${emHeader('Brave The World · Auditoría', (f.nombre||'').split(/\s+/)[0]||'Equipo', 'nueva auditoría recibida', true)}
+    ${emLabel('Contacto','#f97316')}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Nombre',f.nombre)}${row('Email',f.email)}${row('Teléfono',f.telefono)}${row('Mejor hora',f.hora_contacto)}</table>
+    ${emLabel('Números del negocio','#2dd4bf')}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Clientes 12m',f.clientes_12m)}${row('Ticket medio',f.ticket_medio)}${row('Facturación mensual',f.facturacion_mensual)}${row('Margen %',f.margen)}${row('Plazas por grupo',f.plazas_grupo)}${row('Viajes/año actual',f.viajes_anuales)}</table>
+    ${emLabel('Llenar viajes','#f97316')}<p style="${EM.para}">${f.llenar_viajes||'—'}</p>
+    ${emLabel('Proceso de ventas','#2dd4bf')}<p style="${EM.para}">${f.proceso_ventas||'—'}</p>
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Leads/mes',f.leads_mes)}${row('Ventas/mes',f.ventas_mes)}${row('Objeción principal',f.objecion_principal)}${row('CRM actual',f.crm)}${row('Horas/sem ventas',f.horas_ventas)}</table>
+    ${emLabel('Canales de captación','#f97316')}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Instagram',f.canal_instagram)}${row('TikTok',f.canal_tiktok)}${row('YouTube',f.canal_youtube)}${row('Google orgánico',f.canal_google)}${row('Meta Ads',f.canal_metaads)}${row('Google Ads',f.canal_googleads)}${row('Boca a boca',f.canal_bocaaboca)}${row('Influencers',f.canal_influencers)}${row('Email marketing',f.canal_email)}${row('WhatsApp',f.canal_whatsapp)}</table>
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('IG seguidores',f.ig_seguidores)}${row('IG alcance medio',f.ig_alcance)}${row('Budget ads/mes',f.budget_ads)}${row('Lista emails',f.lista_emails)}</table>
+    ${emLabel('Tracking clientes','#2dd4bf')}<p style="${EM.para}">${f.tracking_clientes||'—'}</p>
+    ${emLabel('Programa de gimnasios','#f97316')}
+    <p style="${EM.para}">${f.gimnasios_contactados||'—'}</p>
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Estimación gimnasios ES',f.estimacion_gimnasios)}${row('Estructura comisión',f.estructura_comision)}${row('Landing co-branded',f.landing_cobranded)}${row('Freno actual',f.freno_gimnasios)}</table>
+    ${emLabel('Tipo de socios','#2dd4bf')}<p style="${EM.para}">${f.tipo_socios||'—'}</p>
+    ${emLabel('Web y herramientas','#f97316')}
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Tech web',f.tech_web)}${row('Visitas/mes',f.visitas_web)}${row('SEO actual',f.seo_actual)}${row('Google My Business',f.gmb)}${row('Usa GHL',f.usa_ghl)}${row('Presupuesto/mes tools',f.presupuesto_mensual)}</table>
+    ${emLabel('Objetivos','#2dd4bf')}
+    <p style="${EM.para}"><b>Objetivo principal:</b> ${f.objetivo_principal||'—'}</p>
+    <table style="border-collapse:collapse;margin:0 0 18px">${row('Partners objetivo (6m)',f.objetivo_partners)}${row('Facturación objetivo (12m)',f.objetivo_facturacion)}${row('Viajes/año objetivo',f.objetivo_viajes)}</table>
+    <p style="${EM.para}"><b>Prioridades:</b><br>${(f.prioridades||'—').replace(/\n/g,'<br>')}</p>
+    ${f.otro?`<p style="${EM.para}"><b>Otros comentarios:</b><br>${f.otro.replace(/\n/g,'<br>')}</p>`:''}
+    <div style="${EM.footer}">Formulario Brave The World · ${f.email||'—'} · ${f.telefono||'—'}</div>
+  </div>`;
+}
+async function handleBraveTheWorld(form) {
+  if(!form || !form.nombre || !form.email) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const token = await gmailToken();
+  await sendHtmlMail(token, `Brave The World · Auditoría recibida — ${form.nombre}`, braveEmailHtml(form), null);
+  try { await sendClientMail(token, form.email.trim(), `Auditoría recibida · Brave The World ✓`,
+    `<div style="${EM.wrap}">${emHeader('Brave The World', (form.nombre||'').split(/\s+/)[0]||'Hola', 'auditoría recibida', false)}
+    <p style="${EM.para}">Hemos recibido vuestras respuestas ✓. Dani revisará todo y os contactará en menos de 48h con los próximos pasos para construir vuestro sistema de ventas escalable.</p>
+    <p style="${EM.para}">Si tenéis algo que añadir, escribidnos directamente por WhatsApp.</p>
+    <div style="${EM.footer}">— Dani Martínez · Quantum Ventures</div></div>`);
+  } catch(e){ console.error('btw ack', e.message); }
+  return { ok:true };
+}
+
 // ===== Jaan España — pipeline de venues (form + CRM real) =====
 const JAAN_SHEET = process.env.JAAN_SHEET_ID || '';
 const JAAN_KEY = process.env.JAAN_KEY || '';
@@ -604,8 +646,8 @@ if (require.main === module) {
         .catch(e=>{ const code=e.code===403?403:500; res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:code===403?'forbidden':'internal'})); });
       return;
     }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa' || req.url==='/api/jaan-venue' || req.url==='/api/jaan-stage')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : req.url==='/api/jaan-venue' ? handleJaanVenue : req.url==='/api/jaan-stage' ? handleJaanStage : handleAudit;
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa' || req.url==='/api/jaan-venue' || req.url==='/api/jaan-stage' || req.url==='/api/brave-the-world')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : req.url==='/api/jaan-venue' ? handleJaanVenue : req.url==='/api/jaan-stage' ? handleJaanStage : req.url==='/api/brave-the-world' ? handleBraveTheWorld : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }

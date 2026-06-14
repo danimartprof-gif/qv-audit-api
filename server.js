@@ -408,6 +408,7 @@ async function handleVilla(form) {
 
 // ===== Brave The World — auditoría de negocio =====
 function braveEmailHtml(f) {
+  const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
   return `<div style="${EM.wrap}">
     ${emHeader('Brave The World · Auditoría', (f.nombre||'').split(/\s+/)[0]||'Equipo', 'nueva auditoría recibida', true)}
     ${emLabel('Contacto','#f97316')}

@@ -537,6 +537,27 @@ Devuelve en español, estructurado y conciso: 1) QUIÉN ES (2-3 líneas); 2) LIN
   return { ok:true, enriched: !!enrich };
 }
 
+// ===== Lead de la home de quantumventures.io (Venture Partnership vs Sistemas de IA) =====
+const INTERES_LABEL = { partnership:'Venture Partnership', sistemas:'Sistemas de IA', 'no-se':'No lo tiene claro' };
+function leadEmailHtml(form) {
+  const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
+  return `<div style="${EM.wrap}">
+    ${emHeader('Quantum Ventures · Nuevo lead (web)', form.nombre||'—', INTERES_LABEL[form.interes]||form.interes||'', false)}
+    <table style="border-collapse:collapse;margin:0 0 16px">
+      ${row('Email', form.email)}${row('Teléfono', form.telefono)}${row('Negocio / Instagram', form.negocio)}${row('Interés', INTERES_LABEL[form.interes]||form.interes)}
+    </table>
+    ${form.mensaje ? `<div style="${EM.card}">${emLabel('Mensaje','#22d3ee')}<div style="font-size:14px;color:#e7ecf3;line-height:1.7;white-space:pre-wrap">${(''+form.mensaje).replace(/</g,'&lt;')}</div></div>` : ''}
+    <div style="${EM.footer}">Capturado en quantumventures.io · guardado en la hoja de leads.</div>
+  </div>`;
+}
+async function handleLead(form) {
+  if(!form || !form.nombre || !(form.email||form.telefono)) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const token = await gmailToken();
+  await sendHtmlMail(token, `Nuevo lead web · ${form.nombre} (${INTERES_LABEL[form.interes]||form.interes||'—'})`, leadEmailHtml(form), null);
+  await logSheet('Leads Web', [nowES(), form.nombre, form.email||'', form.telefono||'', form.negocio||'', INTERES_LABEL[form.interes]||form.interes||'', form.mensaje||'']);
+  return { ok:true };
+}
+
 // ===== Venue lead (Bali) — captación de hoteles/restaurantes para suministro de agua =====
 function venueEmailHtml(form) {
   const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
@@ -647,8 +668,8 @@ if (require.main === module) {
         .catch(e=>{ const code=e.code===403?403:500; res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:code===403?'forbidden':'internal'})); });
       return;
     }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa' || req.url==='/api/jaan-venue' || req.url==='/api/jaan-stage' || req.url==='/api/brave-the-world')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : req.url==='/api/jaan-venue' ? handleJaanVenue : req.url==='/api/jaan-stage' ? handleJaanStage : req.url==='/api/brave-the-world' ? handleBraveTheWorld : handleAudit;
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa' || req.url==='/api/jaan-venue' || req.url==='/api/jaan-stage' || req.url==='/api/brave-the-world' || req.url==='/api/lead')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : req.url==='/api/jaan-venue' ? handleJaanVenue : req.url==='/api/jaan-stage' ? handleJaanStage : req.url==='/api/brave-the-world' ? handleBraveTheWorld : req.url==='/api/lead' ? handleLead : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }
@@ -661,4 +682,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead, sendAuditAck, ackReceivedHtml, ackCompleteHtml, emailInTab };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead, sendAuditAck, ackReceivedHtml, ackCompleteHtml, emailInTab, handleLead };

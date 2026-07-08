@@ -600,6 +600,41 @@ async function handleLead(form) {
   return { ok:true, ghl: !!(ghl && ghl.contactId) };
 }
 
+// ===== Diagnóstico Sistemas de IA — secuencia de formularios de cualificación previa a la llamada de ventas =====
+const TIPO_NEGOCIO_LABEL = { 'coach-1-1':'Coach 1:1', 'coach-grupal':'Coach grupal / comunidad', 'agencia':'Agencia', 'infoproductos':'Infoproductos', 'otro':'Otro' };
+const URGENCIA_LABEL = { 'ya':'Quiere empezar ya', 'mes':'En el próximo mes', 'explorando':'Solo explorando' };
+const DOLOR_LABEL = { 'dudas':'Dudas repetitivas de clientes', 'seguimiento':'Seguimiento / check-ins', 'onboarding':'Onboarding de clientes nuevos', 'contenido':'Creación de contenido', 'captacion':'Captación de leads', 'ventas':'Ventas / cierre', 'contabilidad':'Contabilidad y facturación', 'equipo':'Gestión de equipo' };
+function diagnosticoEmailHtml(form) {
+  const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
+  const dolores = (Array.isArray(form.puntos_dolor) ? form.puntos_dolor : (form.puntos_dolor||'').split(',').filter(Boolean)).map(d=>DOLOR_LABEL[d]||d);
+  return `<div style="${EM.wrap}">
+    ${emHeader('Quantum Ventures · Diagnóstico Sistemas de IA', form.nombre||'—', TIPO_NEGOCIO_LABEL[form.tipo_negocio]||form.tipo_negocio||'', false)}
+    <p style="${EM.para}">Diagnóstico de cualificación recibido antes de la llamada de ventas. Léelo antes de contactar.</p>
+    ${emLabel('Contacto','#22d3ee')}
+    <table style="border-collapse:collapse;margin:0 0 22px">
+      ${row('Email', form.email)}${row('Teléfono', form.telefono)}${row('Negocio / Instagram', form.negocio)}${row('Tipo de negocio', TIPO_NEGOCIO_LABEL[form.tipo_negocio]||form.tipo_negocio)}
+    </table>
+    ${emLabel('Tamaño y números','#22d3ee')}
+    <table style="border-collapse:collapse;margin:0 0 22px">
+      ${row('Clientes activos', form.num_clientes)}${row('Facturación mensual', form.facturacion_mensual)}${row('Horas/semana en tareas operativas', form.horas_operativas)}${row('Herramientas actuales', form.herramientas_actuales)}
+    </table>
+    <div style="${EM.card}">${emLabel('Dónde pierde más tiempo','#f59e0b')}${emList(dolores)}</div>
+    ${form.objetivo ? `<div style="${EM.card}">${emLabel('Objetivo principal','#22d3ee')}<div style="font-size:14px;color:#e7ecf3;line-height:1.7;white-space:pre-wrap">${(''+form.objetivo).replace(/</g,'&lt;')}</div></div>` : ''}
+    ${emLabel('Urgencia','#a855f7')}<p style="${EM.para}">${URGENCIA_LABEL[form.urgencia]||form.urgencia||'—'}</p>
+    <div style="${EM.footer}">Capturado en quantumventures.io/v2/diagnostico · guardado en la hoja "Diagnóstico Sistemas IA".</div>
+  </div>`;
+}
+async function handleDiagnostico(form) {
+  if(!form || !form.nombre || !(form.email||form.telefono)) { const e=new Error('missing fields'); e.code=400; throw e; }
+  const token = await gmailToken();
+  await sendHtmlMail(token, `Diagnóstico Sistemas IA · ${form.nombre} (${TIPO_NEGOCIO_LABEL[form.tipo_negocio]||form.tipo_negocio||'—'})`, diagnosticoEmailHtml(form), null);
+  const dolores = (Array.isArray(form.puntos_dolor) ? form.puntos_dolor : (form.puntos_dolor||'').split(',').filter(Boolean)).map(d=>DOLOR_LABEL[d]||d).join(' · ');
+  await logSheet('Diagnóstico Sistemas IA', [nowES(), form.nombre, form.email||'', form.telefono||'', form.negocio||'', TIPO_NEGOCIO_LABEL[form.tipo_negocio]||form.tipo_negocio||'', form.num_clientes||'', form.facturacion_mensual||'', form.horas_operativas||'', form.herramientas_actuales||'', dolores, form.objetivo||'', URGENCIA_LABEL[form.urgencia]||form.urgencia||'']);
+  let ghl = null;
+  try { ghl = await ghlCreateLead({ nombre: form.nombre, email: form.email, telefono: form.telefono, interes: 'sistemas' }); } catch(e) { console.error('ghl diagnostico error:', e.message); }
+  return { ok:true, ghl: !!(ghl && ghl.contactId) };
+}
+
 // ===== Venue lead (Bali) — captación de hoteles/restaurantes para suministro de agua =====
 function venueEmailHtml(form) {
   const row=(k,v)=>`<tr><td style="padding:6px 16px 6px 0;color:#9aa6b8;font-size:14px;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:6px 0;color:#e7ecf3;font-size:14px">${v||'—'}</td></tr>`;
@@ -710,8 +745,8 @@ if (require.main === module) {
         .catch(e=>{ const code=e.code===403?403:500; res.writeHead(code,{'Content-Type':'application/json'}); res.end(JSON.stringify({error:code===403?'forbidden':'internal'})); });
       return;
     }
-    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa' || req.url==='/api/jaan-venue' || req.url==='/api/jaan-stage' || req.url==='/api/brave-the-world' || req.url==='/api/lead')){
-      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : req.url==='/api/jaan-venue' ? handleJaanVenue : req.url==='/api/jaan-stage' ? handleJaanStage : req.url==='/api/brave-the-world' ? handleBraveTheWorld : req.url==='/api/lead' ? handleLead : handleAudit;
+    if(req.method==='POST' && (req.url==='/api/audit' || req.url==='/api/audit-product' || req.url==='/api/fiscal' || req.url==='/api/contacto' || req.url==='/api/cliente' || req.url==='/api/venue' || req.url==='/api/ambassador' || req.url==='/api/villa-brisa' || req.url==='/api/jaan-venue' || req.url==='/api/jaan-stage' || req.url==='/api/brave-the-world' || req.url==='/api/lead' || req.url==='/api/diagnostico-sistemas')){
+      const handler = req.url==='/api/audit-product' ? handleProduct : req.url==='/api/fiscal' ? handleFiscal : req.url==='/api/contacto' ? handleContacto : req.url==='/api/cliente' ? handleCliente : req.url==='/api/venue' ? handleVenue : req.url==='/api/ambassador' ? handleAmbassador : req.url==='/api/villa-brisa' ? handleVilla : req.url==='/api/jaan-venue' ? handleJaanVenue : req.url==='/api/jaan-stage' ? handleJaanStage : req.url==='/api/brave-the-world' ? handleBraveTheWorld : req.url==='/api/lead' ? handleLead : req.url==='/api/diagnostico-sistemas' ? handleDiagnostico : handleAudit;
       let body=''; req.on('data',c=>{body+=c; if(body.length>1e6) req.destroy();});
       req.on('end', async ()=>{
         try{ const form=JSON.parse(body||'{}'); const out=await handler(form); res.writeHead(200,{'Content-Type':'application/json'}); res.end(JSON.stringify(out)); }
@@ -724,4 +759,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead, sendAuditAck, ackReceivedHtml, ackCompleteHtml, emailInTab, handleLead, ghlCreateLead };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead, sendAuditAck, ackReceivedHtml, ackCompleteHtml, emailInTab, handleLead, ghlCreateLead, handleDiagnostico };

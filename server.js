@@ -9,6 +9,10 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const RECIPIENTS = process.env.AUDIT_RECIPIENTS || 'dani.martprof@gmail.com';
 const SENDER = process.env.SENDER_EMAIL || 'dani.martprof@gmail.com';
 const CORS = process.env.CORS_ORIGIN || '*';
+const GHL_TOKEN = process.env.GHL_TOKEN || '';
+const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID || '';
+const GHL_PIPELINE_ID = process.env.GHL_PIPELINE_ID || '';
+const GHL_STAGE_ID = process.env.GHL_STAGE_ID || '';
 const SHEET_ID = process.env.AUDIT_SHEET_ID || '';
 const CLIENTS_FOLDER = process.env.QV_CLIENTS_FOLDER || '';
 
@@ -550,12 +554,44 @@ function leadEmailHtml(form) {
     <div style="${EM.footer}">Capturado en quantumventures.io · guardado en la hoja de leads.</div>
   </div>`;
 }
+async function ghlCreateLead(form) {
+  if (!GHL_TOKEN || !GHL_LOCATION_ID) return null;
+  const headers = { Authorization:`Bearer ${GHL_TOKEN}`, 'Version':'2021-07-28', 'Content-Type':'application/json' };
+  const contactBody = {
+    locationId: GHL_LOCATION_ID,
+    firstName: form.nombre,
+    email: form.email || undefined,
+    phone: form.telefono || undefined,
+    source: 'web-quantumventures.io',
+    tags: ['web-lead', form.interes ? `interes-${form.interes}` : 'interes-desconocido'],
+  };
+  const cr = await fetch('https://services.leadconnectorhq.com/contacts/', { method:'POST', headers, body: JSON.stringify(contactBody) });
+  const cj = await cr.json();
+  if (!cr.ok) { console.error('ghl contact error', cr.status, JSON.stringify(cj)); return null; }
+  const contactId = cj.contact && cj.contact.id;
+  if (!contactId || !GHL_PIPELINE_ID || !GHL_STAGE_ID) return { contactId };
+  const oppBody = {
+    pipelineId: GHL_PIPELINE_ID,
+    locationId: GHL_LOCATION_ID,
+    name: `Web · ${form.nombre} · ${INTERES_LABEL[form.interes]||form.interes||'sin interés'}`,
+    pipelineStageId: GHL_STAGE_ID,
+    status: 'open',
+    contactId,
+  };
+  const or = await fetch('https://services.leadconnectorhq.com/opportunities/', { method:'POST', headers, body: JSON.stringify(oppBody) });
+  const oj = await or.json();
+  if (!or.ok) { console.error('ghl opportunity error', or.status, JSON.stringify(oj)); return { contactId }; }
+  return { contactId, opportunityId: oj.opportunity && oj.opportunity.id };
+}
+
 async function handleLead(form) {
   if(!form || !form.nombre || !(form.email||form.telefono)) { const e=new Error('missing fields'); e.code=400; throw e; }
   const token = await gmailToken();
   await sendHtmlMail(token, `Nuevo lead web · ${form.nombre} (${INTERES_LABEL[form.interes]||form.interes||'—'})`, leadEmailHtml(form), null);
   await logSheet('Leads Web', [nowES(), form.nombre, form.email||'', form.telefono||'', form.negocio||'', INTERES_LABEL[form.interes]||form.interes||'', form.mensaje||'']);
-  return { ok:true };
+  let ghl = null;
+  try { ghl = await ghlCreateLead(form); } catch(e) { console.error('ghl lead error:', e.message); }
+  return { ok:true, ghl: !!(ghl && ghl.contactId) };
 }
 
 // ===== Venue lead (Bali) — captación de hoteles/restaurantes para suministro de agua =====
@@ -682,4 +718,4 @@ if (require.main === module) {
   server.listen(process.env.PORT||8080, ()=>console.log('QV audit API on '+(process.env.PORT||8080)));
 }
 
-module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead, sendAuditAck, ackReceivedHtml, ackCompleteHtml, emailInTab, handleLead };
+module.exports = { score, sendEmail, handleAudit, scoreProduct, handleProduct, emailHtml, productEmailHtml, getAvatar, primaryProfile, handleFiscal, logSheet, handleContacto, geminiSearch, handleCliente, handleVenue, handleAmbassador, getAmbassadors, sheetRead, sendAuditAck, ackReceivedHtml, ackCompleteHtml, emailInTab, handleLead, ghlCreateLead };

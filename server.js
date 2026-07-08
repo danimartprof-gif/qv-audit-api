@@ -554,6 +554,12 @@ function leadEmailHtml(form) {
     <div style="${EM.footer}">Capturado en quantumventures.io · guardado en la hoja de leads.</div>
   </div>`;
 }
+function normalizePhone(p) {
+  if (!p) return undefined;
+  const t = (''+p).trim();
+  if (!t) return undefined;
+  return t.startsWith('+') ? t : '+34' + t.replace(/[^0-9]/g,'');
+}
 async function ghlCreateLead(form) {
   if (!GHL_TOKEN || !GHL_LOCATION_ID) return null;
   const headers = { Authorization:`Bearer ${GHL_TOKEN}`, 'Version':'2021-07-28', 'Content-Type':'application/json' };
@@ -561,7 +567,7 @@ async function ghlCreateLead(form) {
     locationId: GHL_LOCATION_ID,
     firstName: form.nombre,
     email: form.email || undefined,
-    phone: form.telefono || undefined,
+    phone: normalizePhone(form.telefono),
     source: 'web-quantumventures.io',
     tags: ['web-lead', form.interes ? `interes-${form.interes}` : 'interes-desconocido'],
   };

@@ -13,6 +13,8 @@ const GHL_TOKEN = process.env.GHL_TOKEN || '';
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID || '';
 const GHL_PIPELINE_ID = process.env.GHL_PIPELINE_ID || '';
 const GHL_STAGE_ID = process.env.GHL_STAGE_ID || '';
+const GHL_DIAG_PIPELINE_ID = process.env.GHL_DIAG_PIPELINE_ID || '';
+const GHL_DIAG_STAGE_ID = process.env.GHL_DIAG_STAGE_ID || '';
 const SHEET_ID = process.env.AUDIT_SHEET_ID || '';
 const CLIENTS_FOLDER = process.env.QV_CLIENTS_FOLDER || '';
 
@@ -560,8 +562,11 @@ function normalizePhone(p) {
   if (!t) return undefined;
   return t.startsWith('+') ? t : '+34' + t.replace(/[^0-9]/g,'');
 }
-async function ghlCreateLead(form) {
+async function ghlCreateLead(form, opts) {
+  opts = opts || {};
   if (!GHL_TOKEN || !GHL_LOCATION_ID) return null;
+  const pipelineId = opts.pipelineId || GHL_PIPELINE_ID;
+  const stageId = opts.stageId || GHL_STAGE_ID;
   const headers = { Authorization:`Bearer ${GHL_TOKEN}`, 'Version':'2021-07-28', 'Content-Type':'application/json' };
   const contactBody = {
     locationId: GHL_LOCATION_ID,
@@ -569,18 +574,18 @@ async function ghlCreateLead(form) {
     email: form.email || undefined,
     phone: normalizePhone(form.telefono),
     source: 'web-quantumventures.io',
-    tags: ['web-lead', form.interes ? `interes-${form.interes}` : 'interes-desconocido'],
+    tags: ['web-lead', opts.tag || (form.interes ? `interes-${form.interes}` : 'interes-desconocido')],
   };
   const cr = await fetch('https://services.leadconnectorhq.com/contacts/', { method:'POST', headers, body: JSON.stringify(contactBody) });
   const cj = await cr.json();
   if (!cr.ok) { console.error('ghl contact error', cr.status, JSON.stringify(cj)); return null; }
   const contactId = cj.contact && cj.contact.id;
-  if (!contactId || !GHL_PIPELINE_ID || !GHL_STAGE_ID) return { contactId };
+  if (!contactId || !pipelineId || !stageId) return { contactId };
   const oppBody = {
-    pipelineId: GHL_PIPELINE_ID,
+    pipelineId,
     locationId: GHL_LOCATION_ID,
-    name: `Web · ${form.nombre} · ${INTERES_LABEL[form.interes]||form.interes||'sin interés'}`,
-    pipelineStageId: GHL_STAGE_ID,
+    name: opts.oppName || `Web · ${form.nombre} · ${INTERES_LABEL[form.interes]||form.interes||'sin interés'}`,
+    pipelineStageId: stageId,
     status: 'open',
     contactId,
   };
@@ -631,7 +636,17 @@ async function handleDiagnostico(form) {
   const dolores = (Array.isArray(form.puntos_dolor) ? form.puntos_dolor : (form.puntos_dolor||'').split(',').filter(Boolean)).map(d=>DOLOR_LABEL[d]||d).join(' · ');
   await logSheet('Diagnóstico Sistemas IA', [nowES(), form.nombre, form.email||'', form.telefono||'', form.negocio||'', TIPO_NEGOCIO_LABEL[form.tipo_negocio]||form.tipo_negocio||'', form.num_clientes||'', form.facturacion_mensual||'', form.horas_operativas||'', form.herramientas_actuales||'', dolores, form.objetivo||'', URGENCIA_LABEL[form.urgencia]||form.urgencia||'']);
   let ghl = null;
-  try { ghl = await ghlCreateLead({ nombre: form.nombre, email: form.email, telefono: form.telefono, interes: 'sistemas' }); } catch(e) { console.error('ghl diagnostico error:', e.message); }
+  try {
+    ghl = await ghlCreateLead(
+      { nombre: form.nombre, email: form.email, telefono: form.telefono, interes: 'sistemas' },
+      {
+        pipelineId: GHL_DIAG_PIPELINE_ID,
+        stageId: GHL_DIAG_STAGE_ID,
+        tag: 'diagnostico-sistemas-ia',
+        oppName: `Diagnóstico · ${form.nombre} · ${TIPO_NEGOCIO_LABEL[form.tipo_negocio]||form.tipo_negocio||'—'}`,
+      }
+    );
+  } catch(e) { console.error('ghl diagnostico error:', e.message); }
   return { ok:true, ghl: !!(ghl && ghl.contactId) };
 }
 
